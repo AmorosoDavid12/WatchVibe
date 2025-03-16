@@ -79,9 +79,17 @@ export async function signInWithGoogle() {
 }
 
 export async function resetPassword(email: string) {
+  // Use a more direct approach that bypasses some redirection issues
+  const site_url = process.env.EXPO_PUBLIC_APP_URL || 'http://localhost:8081';
+  
+  // First, ensure we're signed out to avoid token conflicts
+  await supabase.auth.signOut();
+  
+  // Then send the reset password email with explicit redirect
   const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: process.env.EXPO_PUBLIC_APP_URL ? `${process.env.EXPO_PUBLIC_APP_URL}/reset-password` : 'http://localhost:8081/reset-password',
+    redirectTo: `${site_url}/auth/callback?reset=true`,
   });
+  
   return { data, error };
 }
 
