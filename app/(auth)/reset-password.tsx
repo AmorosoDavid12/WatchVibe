@@ -27,6 +27,14 @@ export default function ResetPasswordScreen() {
         if (typeof window !== 'undefined') {
           console.log('Checking for recovery token');
           
+          // IMPORTANT: First check if we have an active session and sign out
+          // This ensures we don't show "already logged in" state
+          const checkSession = await supabase.auth.getSession();
+          if (checkSession?.data?.session) {
+            console.log('Active session detected on reset password page, signing out');
+            await supabase.auth.signOut();
+          }
+          
           const urlSearchParams = new URLSearchParams(window.location.search);
           const source = urlSearchParams.get('source');
           const errorParam = urlSearchParams.get('error');
@@ -124,14 +132,19 @@ export default function ResetPasswordScreen() {
           // Make a direct API call to Supabase Auth API to verify the token
           // and update the password in one step
           const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gihofdmqjwgkotwxdxms.supabase.co';
+          const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
           const apiUrl = `${supabaseUrl}/auth/v1/verify`;
           
           console.log('Making direct API call to verify token and update password');
+          console.log('API URL:', apiUrl);
+          console.log('Using token of length:', recoveryToken ? recoveryToken.length : 0);
+          
           const response = await fetch(apiUrl, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'apikey': process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '',
+              'apikey': supabaseKey,
+              'Authorization': `Bearer ${supabaseKey}`,
             },
             body: JSON.stringify({
               token: recoveryToken,
@@ -141,10 +154,17 @@ export default function ResetPasswordScreen() {
           });
           
           const result = await response.json();
+          console.log('API response status:', response.status);
           
           if (!response.ok) {
-            console.error('API error:', result.error, result.error_description);
-            throw new Error(result.error_description || 'Error updating password');
+            console.error('API error:', result);
+            if (response.status === 401) {
+              throw new Error('Recovery token is invalid or expired. Please request a new password reset link.');
+            } else if (response.status === 422) {
+              throw new Error('Password does not meet requirements. It must be at least 6 characters long.');
+            } else {
+              throw new Error(result.error_description || result.error || 'Error updating password');
+            }
           }
           
           console.log('Password updated successfully via direct API');

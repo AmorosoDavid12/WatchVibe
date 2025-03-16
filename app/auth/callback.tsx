@@ -59,8 +59,12 @@ export default function AuthCallbackPage() {
         if (isRecovery) {
           console.log('Handling password recovery flow');
           
-          // For password reset, we extract the token from the URL and store it temporarily
-          // This approach works around Supabase's token invalidation after use
+          // IMPORTANT: Check for and clear any existing session FIRST
+          // This prevents the automatic login behavior
+          console.log('Signing out user to prevent automatic login');
+          await supabase.auth.signOut();
+          
+          // For password reset, extract the token from the URL and store it temporarily
           if ((type === 'recovery' && token) || preventAutoLogin) {
             console.log('Detected recovery flow, extracting token');
             
