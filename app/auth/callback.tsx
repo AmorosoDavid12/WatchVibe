@@ -16,11 +16,18 @@ export default function AuthCallbackPage() {
         setProcessing(true);
         console.log('Auth callback - URL params:', params);
         
-        // Get the full URL including hash
+        // Get the full URL including hash and search params
         const url = window.location.href;
         console.log('Full URL:', url);
         
-        // Parse hash parameters
+        // Check URL Search Params first (for verification links)
+        const urlSearchParams = new URLSearchParams(window.location.search);
+        const token = urlSearchParams.get('token');
+        const type = urlSearchParams.get('type');
+        
+        console.log('URL Search Params - token:', !!token, 'type:', type);
+        
+        // Then check hash params (for other auth flows)
         const hashParams = url.includes('#') ? 
           Object.fromEntries(
             url
@@ -31,73 +38,64 @@ export default function AuthCallbackPage() {
         
         console.log('Hash params:', hashParams);
         
-        // Check if this is a recovery (password reset) flow
-        const isRecovery = params.type === 'recovery' || 
-                          url.includes('type=recovery') || 
-                          hashParams.type === 'recovery';
+        // Determine if this is a recovery flow - check multiple places
+        const isRecovery = 
+          type === 'recovery' || 
+          params.type === 'recovery' || 
+          hashParams.type === 'recovery' || 
+          url.includes('type=recovery');
                           
-        // Try to get token from URL params first, then from hash fragment
-        const urlParams = new URLSearchParams(window.location.search);
-        const token = params.token || 
-                     urlParams.get('token') || 
-                     hashParams.access_token;
+        console.log('Is recovery flow:', isRecovery);
+        
+        // Get token from various possible locations
+        const accessToken = 
+          token || 
+          params.token || 
+          hashParams.access_token;
+        
+        console.log('Token present:', !!accessToken);
         
         if (isRecovery) {
-          console.log('Detected password recovery flow, token present:', !!token);
+          console.log('Handling password recovery flow');
           
-          if (!token) {
+          if (!accessToken) {
             throw new Error('Password reset token not found in URL');
           }
           
-          // For password recovery with hash fragment, set the session using the hash data
+          // For verification links, we need to redirect directly to reset-password
+          // WITHOUT setting the session first (which would log the user in)
+          if (type === 'recovery' && token) {
+            console.log('Detected direct verification link, redirecting to reset-password');
+            router.replace('/reset-password');
+            return;
+          }
+          
+          // For hash fragments with access tokens
           if (hashParams.access_token) {
             console.log('Setting session with hash access token');
-            await supabase.auth.setSession({
+            // We may need to set the session to get access
+            const { error: sessionError } = await supabase.auth.setSession({
               access_token: hashParams.access_token,
               refresh_token: hashParams.refresh_token || '',
             });
+            
+            if (sessionError) {
+              console.error('Error setting session:', sessionError);
+            }
           }
           
-          // Check if we have a valid session from the auth redirect
+          // Check if we have a valid session
           const { data: sessionData } = await supabase.auth.getSession();
           console.log('Session check result:', sessionData?.session ? 'Valid session' : 'No session');
           
-          if (sessionData?.session) {
-            console.log('Valid session detected for password reset');
-            // Redirect to the reset password page where user can set a new password
-            router.replace('/reset-password');
-          } else {
-            console.log('No valid session, attempting to exchange token for session');
-            // We might need to exchange the token for a session in some cases
-            try {
-              // This helps in some cases to create a valid recovery session
-              const { error: verifyError } = await supabase.auth.verifyOtp({
-                token_hash: token,
-                type: 'recovery',
-              });
-              
-              if (verifyError) {
-                console.error('Error verifying token:', verifyError);
-              }
-              
-              // Try to set the session using the token from hash if available
-              if (hashParams.access_token) {
-                await supabase.auth.setSession({
-                  access_token: hashParams.access_token,
-                  refresh_token: hashParams.refresh_token || '',
-                });
-              }
-              
-              // Redirect to reset password page
-              router.replace('/reset-password');
-            } catch (err) {
-              console.error('Error with token verification:', err);
-              // Still try to redirect to reset password page
-              router.replace('/reset-password');
-            }
-          }
+          // Regardless of session status, redirect to reset-password
+          // The reset-password page will verify if the session is valid
+          console.log('Redirecting to reset password page');
+          router.replace('/reset-password');
         } else {
           // Handle other auth types (like OAuth)
+          console.log('Handling non-recovery auth flow');
+          
           // If we have an access token in the hash, try to set the session
           if (hashParams.access_token) {
             await supabase.auth.setSession({

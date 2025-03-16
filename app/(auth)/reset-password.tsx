@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Lock } from 'lucide-react-native';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -17,54 +18,93 @@ export default function ResetPasswordScreen() {
   const [hasSession, setHasSession] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
   const [passwordResetComplete, setPasswordResetComplete] = useState(false);
-
-  // Check for password recovery event and session
+  
+  // Check for direct verification link first
   useEffect(() => {
-    let isMounted = true;
-    
-    const checkSessionAndEvent = async () => {
+    const checkForDirectVerification = async () => {
       try {
-        // Check if we have an active recovery session
-        const { data: authData } = await supabase.auth.getSession();
-        console.log('Reset password page - Session check:', authData?.session ? 'Has session' : 'No session');
-        
-        if (isMounted) {
-          if (authData?.session) {
-            // We have a session, proceed with password reset
-            setHasSession(true);
-          } else {
-            // No session yet, try waiting a moment for session to be established
-            // This helps when coming directly from the auth callback
-            setTimeout(async () => {
-              if (!isMounted) return;
+        // Check URL search params for a direct verification link
+        if (typeof window !== 'undefined') {
+          console.log('Checking for direct verification token in URL');
+          const urlSearchParams = new URLSearchParams(window.location.search);
+          const token = urlSearchParams.get('token');
+          const type = urlSearchParams.get('type');
+          
+          if (token && type === 'recovery') {
+            console.log('Found direct verification token');
+            // We need to verify this token and create a session
+            try {
+              const { error } = await supabase.auth.verifyOtp({
+                token_hash: token,
+                type: 'recovery',
+              });
               
-              const { data: retryData } = await supabase.auth.getSession();
-              console.log('Retry session check:', retryData?.session ? 'Has session' : 'Still no session');
-              
-              if (retryData?.session) {
-                setHasSession(true);
+              if (error) {
+                console.error('Error verifying OTP:', error);
+                setError('Your reset link is invalid or has expired. Please request a new one.');
               } else {
-                // No session, show error and provide option to request new link
-                setError('No active session found. Please use a reset link from your email or request a new one.');
+                console.log('OTP verified successfully');
+                setHasSession(true);
               }
+            } catch (err) {
+              console.error('Error processing verification token:', err);
+              setError('There was a problem verifying your reset link.');
+            } finally {
               setIsCheckingSession(false);
-            }, 1000);
+            }
             return;
           }
         }
+        
+        // Continue with normal session check
+        checkSessionAndEvent();
       } catch (err) {
-        console.error('Error checking session:', err);
-        if (isMounted) {
-          setError('Error verifying your session. Please try again.');
-        }
-      } finally {
-        if (isMounted) {
-          setIsCheckingSession(false);
-        }
+        console.error('Error in verification check:', err);
+        setIsCheckingSession(false);
       }
     };
+    
+    checkForDirectVerification();
+  }, []);
 
-    // Also set up a listener for the PASSWORD_RECOVERY event
+  // Check for password recovery event and session
+  const checkSessionAndEvent = async () => {
+    let isMounted = true;
+    
+    try {
+      // Check if we have an active recovery session
+      const { data: authData } = await supabase.auth.getSession();
+      console.log('Reset password page - Session check:', authData?.session ? 'Has session' : 'No session');
+      
+      if (authData?.session) {
+        // We have a session, proceed with password reset
+        setHasSession(true);
+        setIsCheckingSession(false);
+      } else {
+        // No session yet, try waiting a moment for session to be established
+        // This helps when coming directly from the auth callback
+        setTimeout(async () => {
+          const { data: retryData } = await supabase.auth.getSession();
+          console.log('Retry session check:', retryData?.session ? 'Has session' : 'Still no session');
+          
+          if (retryData?.session) {
+            setHasSession(true);
+          } else {
+            // No session, show error and provide option to request new link
+            setError('No active session found. Please use a reset link from your email or request a new one.');
+          }
+          setIsCheckingSession(false);
+        }, 1000);
+      }
+    } catch (err) {
+      console.error('Error checking session:', err);
+      setError('Error verifying your session. Please try again.');
+      setIsCheckingSession(false);
+    }
+  };
+
+  // Also set up a listener for the PASSWORD_RECOVERY event
+  useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       (event: any, session: any) => {
         console.log('Auth event in reset password:', event);
@@ -77,10 +117,7 @@ export default function ResetPasswordScreen() {
       }
     );
     
-    checkSessionAndEvent();
-    
     return () => {
-      isMounted = false;
       subscription.unsubscribe();
     };
   }, []);
