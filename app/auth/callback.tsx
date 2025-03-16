@@ -34,6 +34,9 @@ export default function AuthCallbackPage() {
           localStorage.removeItem('passwordResetUserId');
           localStorage.removeItem('hasValidSession');
           
+          // Add recovery session flag
+          localStorage.setItem('isRecoverySession', 'true');
+          
           if (session?.user?.email) {
             localStorage.setItem('passwordResetEmail', session.user.email);
             localStorage.setItem('passwordResetTimestamp', Date.now().toString());
@@ -64,6 +67,13 @@ export default function AuthCallbackPage() {
       if (event === 'SIGNED_IN') {
         console.log('User signed in');
         
+        // Check if this is a recovery session
+        if (typeof window !== 'undefined' && localStorage.getItem('isRecoverySession') === 'true') {
+          console.log('Recovery session detected, redirecting to reset password');
+          router.replace('/reset-password');
+          return;
+        }
+        
         // Normal sign in - redirect to home
         router.replace('/');
         return;
@@ -90,6 +100,9 @@ export default function AuthCallbackPage() {
         // Handle password recovery in the URL (from emails)
         if (type === 'recovery') {
           console.log('Recovery link detected in URL');
+          
+          // Mark this as a recovery session
+          localStorage.setItem('isRecoverySession', 'true');
           
           // Try to extract email from URL if present
           let email = null;

@@ -30,9 +30,9 @@ export default function ForgotPasswordScreen() {
         redirectUrl = `${origin}/reset-password`;
       }
 
-      // Send password reset email
+      // Send password reset email with type parameter
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: redirectUrl
+        redirectTo: redirectUrl ? `${redirectUrl}?type=recovery` : undefined
       });
       
       if (error) throw error;

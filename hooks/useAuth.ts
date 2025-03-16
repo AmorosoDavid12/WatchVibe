@@ -28,6 +28,15 @@ export default function useAuth() {
         setIsLoading(true);
         const { data: sessionData } = await supabase.auth.getSession();
         setIsLoggedIn(!!sessionData.session);
+        
+        // Check for recovery session
+        if (typeof window !== 'undefined' && 
+            localStorage.getItem('isRecoverySession') === 'true' && 
+            sessionData.session) {
+          console.log('Recovery session detected in initial session check');
+          router.push('/reset-password');
+        }
+        
         setAuthInitialized(true);
       } catch (error) {
         console.error('Error getting initial session:', error);
@@ -59,17 +68,36 @@ export default function useAuth() {
 
         // Handle special auth events
         if (event === 'PASSWORD_RECOVERY') {
-          // For PASSWORD_RECOVERY, we'll let the auth callback handle it
-          // Don't redirect here to avoid conflicts
+          console.log('PASSWORD_RECOVERY event in useAuth');
+          
+          // Mark this as a recovery session
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('isRecoverySession', 'true');
+          }
+          
+          // Redirect to reset password page
+          router.push('/reset-password');
           return;
         }
 
         // Default protection - redirect based on auth state
         const isAuthGroup = segments[0] === '(auth)';
         
-        if (session && isAuthGroup) {
-          // Logged in, on auth page, redirect to app
-          router.push('/(tabs)');
+        // Check for recovery session flag
+        const isRecoverySession = typeof window !== 'undefined' && 
+                                localStorage.getItem('isRecoverySession') === 'true';
+        
+        if (session) {
+          if (isRecoverySession) {
+            // If this is a recovery session, force redirect to reset password
+            if (!currentPath.includes('reset-password')) {
+              console.log('Recovery session active, redirecting to reset password');
+              router.push('/reset-password');
+            }
+          } else if (isAuthGroup) {
+            // Normal logged in state - redirect to app
+            router.push('/(tabs)');
+          }
         } else if (!session && !isAuthGroup) {
           // Not logged in, not on auth page, redirect to login
           router.push('/login');

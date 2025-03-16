@@ -165,6 +165,37 @@ export default function ResetPasswordScreen() {
     };
   }, []);
 
+  // Show loading state
+  if (isValidatingSession) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={{ color: '#fff' }}>Verifying your password reset link...</Text>
+      </View>
+    );
+  }
+
+  // Add effect to block navigation during recovery session
+  useEffect(() => {
+    if (hasValidSession && typeof window !== 'undefined' && localStorage.getItem('isRecoverySession') === 'true') {
+      console.log("Blocking navigation during recovery session");
+      
+      // Function to handle before unload event
+      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
+        const message = "Please complete your password reset before leaving this page.";
+        e.returnValue = message;
+        return message;
+      };
+      
+      // Add event listener
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      
+      // Clean up
+      return () => {
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+      };
+    }
+  }, [hasValidSession]);
+
   async function handleResetPassword() {
     // Validate form fields
     if (!password || !confirmPassword) {
@@ -201,6 +232,7 @@ export default function ResetPasswordScreen() {
       localStorage.removeItem('hasValidSession');
       localStorage.removeItem('passwordResetEmail');
       localStorage.removeItem('passwordResetTimestamp');
+      localStorage.removeItem('isRecoverySession'); // Clear recovery session flag
       
       // Wait a moment before redirecting to login
       setTimeout(() => {
@@ -227,15 +259,6 @@ export default function ResetPasswordScreen() {
   // Handle requesting a new password reset
   function handleRequestNewReset() {
     router.replace('/forgot-password');
-  }
-
-  // Show loading state
-  if (isValidatingSession) {
-    return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={{ color: '#fff' }}>Verifying your password reset link...</Text>
-      </View>
-    );
   }
 
   return (
