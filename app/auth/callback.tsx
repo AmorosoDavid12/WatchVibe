@@ -3,6 +3,7 @@ import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { Text } from 'react-native-paper';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { useNavigation } from '@react-navigation/native';
 
 interface HashParams {
   [key: string]: string;
@@ -11,212 +12,127 @@ interface HashParams {
 export default function AuthCallbackPage() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const type = params.type as string;
+  const error = params.error as string;
+  const error_description = params.error_description as string;
   const [isProcessing, setIsProcessing] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [errorState, setErrorState] = useState<string | null>(null);
 
   useEffect(() => {
-    // Add a small delay to ensure router is ready
-    const timer = setTimeout(() => {
-      handleCallback();
-    }, 500);
-    
-    return () => clearTimeout(timer);
-  }, []);
-
-  const handleCallback = async () => {
-    try {
-      console.log("AuthCallback: Processing callback");
-
-      // FULL URL DIAGNOSTICS
-      if (typeof window !== 'undefined') {
-        console.log("AuthCallback: FULL DIAGNOSTICS");
-        console.log("AuthCallback: COMPLETE URL =", window.location.href);
-        console.log("AuthCallback: pathname =", window.location.pathname);
-        console.log("AuthCallback: search =", window.location.search);
-        console.log("AuthCallback: hash =", window.location.hash);
-      }
-
-      // First check for search params
-      const url = window.location.href;
-      const urlSearchParams = new URLSearchParams(window.location.search);
+    // Set up auth state change listener
+    const { data: authListener } = supabase.auth.onAuthStateChange(async (event: any, session: any) => {
+      console.log(`Auth state changed: ${event}`);
       
-      // Check if this is a direct verification link from Supabase
-      const isDirectVerifyLink = url.includes('/auth/v1/verify') || url.includes('gihofdmqjwgkotwxdxms.supabase.co/auth/v1/verify');
-      
-      // Extract token directly from the full URL if present
-      let directToken = null;
-      if (url.includes('token=')) {
-        try {
-          const tokenMatch = url.match(/token=([^&]+)/);
-          if (tokenMatch && tokenMatch[1]) {
-            directToken = tokenMatch[1];
-            console.log("AuthCallback: Extracted direct token from URL");
-          }
-        } catch (e) {
-          console.error("AuthCallback: Error extracting direct token", e);
-        }
-      }
-      
-      // Check URL hash for tokens or recovery type
-      const hash = window.location.hash;
-      let hashParams: HashParams = {};
-      
-      if (hash && hash.includes('=')) {
-        // Handle possible URL encoding in the hash
-        const cleanHash = hash.startsWith('#') ? hash.substring(1) : hash;
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log('Password recovery event detected');
         
-        try {
-          // Try to parse as standard URL params
-          hashParams = Object.fromEntries(
-            new URLSearchParams(cleanHash).entries()
-          );
+        // Store info in localStorage
+        if (typeof window !== 'undefined') {
+          // Clear any previous reset data
+          localStorage.removeItem('passwordResetEmail');
+          localStorage.removeItem('passwordResetTimestamp');
+          localStorage.removeItem('passwordResetUserId');
+          localStorage.removeItem('hasValidSession');
           
-          console.log("AuthCallback: Found hash params:", Object.keys(hashParams));
-        } catch (e) {
-          console.error("AuthCallback: Error parsing hash", e);
-        }
-      }
-      
-      // Check if URL contains reset=true or type=recovery for password reset
-      // Also check for direct verification links from Supabase with type=recovery
-      const isReset = urlSearchParams.get('reset') === 'true' || 
-                      hashParams.type === 'recovery' ||
-                      urlSearchParams.get('type') === 'recovery' ||
-                      (isDirectVerifyLink && url.includes('type=recovery'));
-      
-      // Handle password reset redirect first - highest priority
-      if (isReset) {
-        console.log("AuthCallback: Password RESET flow detected");
-        
-        // Check for tokens in both URL search, direct URL, and hash
-        const token = urlSearchParams.get('token') || directToken || hashParams.token || hashParams.access_token;
-        
-        if (token) {
-          console.log("AuthCallback: Found reset token, storing for use");
-          // Store token in localStorage
-          if (typeof window !== 'undefined') {
-            localStorage.setItem('passwordResetToken', token);
+          if (session?.user?.email) {
+            localStorage.setItem('passwordResetEmail', session.user.email);
             localStorage.setItem('passwordResetTimestamp', Date.now().toString());
             
-            // Store hash tokens as well if present
-            if (hashParams.access_token && hashParams.refresh_token) {
-              localStorage.setItem('passwordResetAccessToken', hashParams.access_token);
-              localStorage.setItem('passwordResetRefreshToken', hashParams.refresh_token);
+            if (session.user.id) {
+              localStorage.setItem('passwordResetUserId', session.user.id);
             }
             
-            // Also store any email if available
-            const email = urlSearchParams.get('email') || hashParams.email;
-            if (email) {
-              localStorage.setItem('passwordResetEmail', email);
-            }
+            // IMPORTANT: Flag that we have a valid session
+            localStorage.setItem('hasValidSession', 'true');
             
-            // If this is a direct verification link, DO NOT set a session
-            // We'll just store the tokens and redirect to the reset-password page
-            if (isDirectVerifyLink) {
-              console.log("AuthCallback: Direct verification link detected, preventing auto-login");
-              
-              // Here we're ensuring we don't set up a session for direct verification links
-              // Store the URL to redirect to reset-password
-              localStorage.setItem('passwordResetSource', 'directVerify');
-              
-              // Redirect to reset-password without setting up a session
-              setTimeout(() => {
-                router.replace('/reset-password?passwordReset=true&directVerify=true');
-              }, 100);
-              return;
-            } else {
-              // Store complete token data for non-direct links
-              const tokenData = {
-                token: token,
-                type: 'recovery',
-                timestamp: Date.now()
-              };
-              localStorage.setItem('passwordResetData', JSON.stringify(tokenData));
-            }
+            console.log('User data saved for password reset');
           }
         }
         
-        // Set processing to false before navigation
-        setIsProcessing(false);
-        
-        try {
-          // Redirect to reset password page
-          console.log("AuthCallback: Redirecting to reset-password");
-          
-          // Use a more conservative approach with linking
-          setTimeout(() => {
-            router.replace('/reset-password?passwordReset=true');
-          }, 100);
-          
-          return;
-        } catch (navError) {
-          console.error("AuthCallback: Navigation error:", navError);
-          setError("Navigation error. Please go to the reset password page manually.");
-          return;
-        }
-      }
-      
-      // For normal authentication (non-password reset)
-      console.log("AuthCallback: Standard auth flow detected");
-      
-      // Check for access token in hash
-      const accessToken = hashParams.access_token;
-      const refreshToken = hashParams.refresh_token;
-      
-      if (accessToken && refreshToken) {
-        console.log("AuthCallback: Setting session with token");
-        const { error } = await supabase.auth.setSession({
-          access_token: accessToken,
-          refresh_token: refreshToken,
+        // Redirect to reset-password with the session intact - don't sign out
+        router.replace({
+          pathname: '/reset-password',
+          params: { 
+            passwordReset: 'true',
+            hasSession: 'true'
+          }
         });
         
-        if (error) {
-          throw new Error('Error setting session: ' + error.message);
-        }
+        return;
       }
       
-      // Check current session
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      
-      if (sessionError) {
-        throw sessionError;
+      if (event === 'SIGNED_IN') {
+        console.log('User signed in');
+        
+        // Normal sign in - redirect to home
+        router.replace('/');
+        return;
       }
-      
-      // Set processing to false before navigation
-      setIsProcessing(false);
-      
+    });
+    
+    // Parse the URL hash if present (from email links)
+    const parseURLHash = async () => {
       try {
-        if (session) {
-          console.log("AuthCallback: Session confirmed, redirecting to home");
-          setTimeout(() => {
-            router.replace('/(tabs)');
-          }, 100);
-        } else {
-          // No session found
-          console.log("AuthCallback: No session found, redirecting to login");
-          setTimeout(() => {
-            router.replace('/login');
-          }, 100);
+        if (typeof window === 'undefined') return;
+        
+        console.log('Checking URL parameters');
+        
+        // Handle error if present
+        if (error) {
+          console.error(`Auth error: ${error}`, error_description);
+          router.replace({
+            pathname: '/login',
+            params: { error: error_description || 'Authentication error' }
+          });
+          return;
         }
-      } catch (navError) {
-        console.error("AuthCallback: Navigation error:", navError);
-        setError("Navigation error. Please go to the home or login page manually.");
+        
+        // Handle password recovery in the URL (from emails)
+        if (type === 'recovery') {
+          console.log('Recovery link detected in URL');
+          
+          // Try to extract email from URL if present
+          let email = null;
+          if (params.email) {
+            email = decodeURIComponent(params.email as string);
+            console.log(`Email from URL: ${email}`);
+            
+            if (typeof window !== 'undefined') {
+              localStorage.setItem('passwordResetEmail', email);
+              localStorage.setItem('passwordResetTimestamp', Date.now().toString());
+            }
+          }
+          
+          // Let the auth state change handler above deal with the actual redirect
+          // This is needed because the EVENT might not fire yet
+          if (typeof window !== 'undefined' && !localStorage.getItem('hasValidSession')) {
+            // Redirect to reset-password if the auth event doesn't fire
+            setTimeout(() => {
+              router.replace({
+                pathname: '/reset-password',
+                params: { 
+                  passwordReset: 'true'
+                }
+              });
+            }, 1000);
+          }
+          
+          return;
+        }
+      } catch (error) {
+        console.error('Error parsing URL hash:', error);
+        router.replace('/login');
       }
-    } catch (error) {
-      console.error('Error in auth callback:', error);
-      setIsProcessing(false);
-      setError("Authentication error. Please try again.");
-      
-      // Safe fallback navigation
-      setTimeout(() => {
-        try {
-          router.replace('/login');
-        } catch (e) {
-          console.error("Fallback navigation failed:", e);
-        }
-      }, 1000);
-    }
-  };
+    };
+    
+    parseURLHash();
+    
+    return () => {
+      if (authListener && authListener.subscription) {
+        authListener.subscription.unsubscribe();
+      }
+    };
+  }, [router, params]);
 
   return (
     <View style={styles.container}>
@@ -224,7 +140,7 @@ export default function AuthCallbackPage() {
       <Text style={styles.text}>
         {isProcessing 
           ? "Processing your authentication..." 
-          : (error || "Redirecting...")}
+          : (errorState || "Redirecting...")}
       </Text>
     </View>
   );
