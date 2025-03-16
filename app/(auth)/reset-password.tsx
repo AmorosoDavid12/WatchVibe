@@ -210,60 +210,121 @@ export default function ResetPasswordScreen() {
             console.log("ResetPassword: Found token in localStorage, using for reset");
             
             try {
-              // First try setting the session with the access token
-              console.log("ResetPassword: Attempting to set session with token");
-              let refreshToken = null;
+              // Extract hash with token from resetData if available
+              const hashWithToken = resetData ? JSON.parse(resetData)?.hash : null;
+              console.log("ResetPassword: Hash with token found:", !!hashWithToken);
               
-              // Try to extract refresh token from stored data if available
-              if (resetData) {
-                try {
-                  const parsedData = JSON.parse(resetData);
-                  if (parsedData.refresh_token) {
-                    refreshToken = parsedData.refresh_token;
+              // Completely different approach - use the passwordRecovery flow
+              console.log("ResetPassword: Using password recovery flow");
+              
+              // First try to create/verify a recovery session
+              let verifyError = null;
+              
+              try {
+                // Use the full hash if available as it includes type=recovery
+                if (hashWithToken) {
+                  console.log("ResetPassword: Verifying OTP with hash");
+                  // Clean the hash if needed
+                  const cleanHash = hashWithToken.startsWith('#') ? hashWithToken.substring(1) : hashWithToken;
+                  
+                  // Extract the token from the hash
+                  const hashParams = new URLSearchParams(cleanHash);
+                  const tokenFromHash = hashParams.get('access_token');
+                  
+                  // Verify OTP with token hash and type
+                  const { error } = await supabase.auth.verifyOtp({
+                    token_hash: tokenFromHash || accessToken,
+                    type: 'recovery'
+                  });
+                  
+                  if (error) {
+                    console.error("ResetPassword: Hash verification error:", error);
+                    verifyError = error;
+                  } else {
+                    console.log("ResetPassword: Hash verification succeeded");
                   }
-                } catch (e) {
-                  console.error("ResetPassword: Error parsing reset data", e);
+                } else {
+                  // Fallback to trying just the token
+                  console.log("ResetPassword: Verifying OTP with token only");
+                  
+                  // Verify OTP with token
+                  const { error } = await supabase.auth.verifyOtp({
+                    token_hash: accessToken,
+                    type: 'recovery'
+                  });
+                  
+                  if (error) {
+                    console.error("ResetPassword: Token verification error:", error);
+                    verifyError = error;
+                  } else {
+                    console.log("ResetPassword: Token verification succeeded");
+                  }
                 }
+              } catch (e) {
+                console.error("ResetPassword: OTP verification exception:", e);
+                verifyError = e;
               }
               
-              // Try to use the session to update the password
-              if (accessToken && refreshToken) {
-                // Set the session first
-                const { error: sessionError } = await supabase.auth.setSession({
-                  access_token: accessToken,
-                  refresh_token: refreshToken
-                });
-                
-                if (sessionError) {
-                  console.error("ResetPassword: Error setting session", sessionError);
-                  throw new Error("Unable to establish session: " + sessionError.message);
-                }
-                
-                // Then update password with the established session
-                const { error: updateError } = await supabase.auth.updateUser({
-                  password: password
-                });
-                
-                if (updateError) throw updateError;
-                
-                console.log("ResetPassword: Password updated successfully via session");
-              } else {
-                // If we don't have a refresh token, try a different approach with the SDK
-                // Use the password recovery method directly
-                console.log("ResetPassword: Using recovery method with token");
-                
+              // Now try with the recovery method - use the email + password combination
+              // This approach does not require an existing session
+              console.log("ResetPassword: Using recovery with email and password");
+              try {
+                // Email is required for this approach
                 if (!email) {
                   throw new Error("Email is required for password reset");
                 }
                 
-                // This needs to match the way the token was originally created
-                // Try to recover using email + new password
-                const { error: recoveryError } = await supabase.auth.updateUser({
-                  password: password,
-                  email: email
+                // Complete the recovery flow
+                const { error: recoveryError, data } = await supabase.auth.resetPasswordForEmail(
+                  email, 
+                  {
+                    redirectTo: `${window.location.origin}/login`,
+                  }
+                );
+                
+                if (recoveryError) {
+                  console.error("ResetPassword: Recovery error:", recoveryError);
+                  throw recoveryError;
+                }
+                
+                console.log("ResetPassword: Recovery initiated successfully", data);
+                
+                // Now we can try to update the password
+                // Try to use signIn to establish a session first
+                console.log("ResetPassword: Attempting signIn with OTP");
+                const { error: signInError, data: signInData } = await supabase.auth.signInWithOtp({
+                  email: email,
+                  options: {
+                    shouldCreateUser: false,
+                  }
                 });
                 
-                if (recoveryError) throw recoveryError;
+                if (signInError) {
+                  console.error("ResetPassword: SignIn error:", signInError);
+                } else {
+                  console.log("ResetPassword: SignIn successful", signInData);
+                }
+                
+                // Finally update the password directly
+                console.log("ResetPassword: Attempting to update password directly");
+                const { error: updateError } = await supabase.auth.updateUser({
+                  password: password,
+                });
+                
+                if (updateError) {
+                  // Special case for session errors - try one more approach
+                  if (updateError.message.includes('session')) {
+                    console.log("ResetPassword: Session error, trying alternate method");
+                    // Try a different approach - use the password recovery token to reset directly
+                    // Supabase might need a specific approach for this scenario
+                    // This is a fallback plan
+                    throw updateError; // For now, propagate the error and let user try again
+                  } else {
+                    throw updateError;
+                  }
+                }
+              } catch (recoveryError) {
+                throw recoveryError;
               }
               
               console.log("ResetPassword: Password updated successfully");
