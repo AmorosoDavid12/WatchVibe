@@ -10,7 +10,6 @@ export default function ResetPasswordScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
-
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [secureTextEntry, setSecureTextEntry] = useState(true);
@@ -19,37 +18,85 @@ export default function ResetPasswordScreen() {
   const [hasValidSession, setHasValidSession] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   
-  // Check for valid session on component mount
+  // Handle URL hash and establish session when component mounts
   useEffect(() => {
-    async function checkSession() {
+    async function processHashParams() {
       try {
-        // Get the current session
-        const { data, error } = await supabase.auth.getSession();
-        
-        if (error) {
-          console.error("Session check error:", error);
-          setError("Your password reset link has expired. Please request a new one.");
+        // Only run in web environment
+        if (typeof window === 'undefined') {
           setIsValidatingSession(false);
           return;
         }
         
-        if (data?.session) {
-          console.log("Valid session found for password reset");
-          setHasValidSession(true);
-          setUserEmail(data.session.user.email);
+        console.log("Processing URL hash for auth tokens");
+        
+        // Get hash fragment (without the # character)
+        const hash = window.location.hash.substring(1);
+        
+        if (!hash) {
+          // No hash parameters - check if we already have a session
+          const { data } = await supabase.auth.getSession();
+          if (data?.session) {
+            console.log("Valid session found without hash params");
+            setHasValidSession(true);
+            setUserEmail(data.session.user.email);
+          } else {
+            console.log("No hash params and no valid session");
+            setError("Your password reset link has expired. Please request a new one.");
+          }
+          setIsValidatingSession(false);
+          return;
+        }
+        
+        // Parse hash params
+        const params = new URLSearchParams(hash);
+        const accessToken = params.get('access_token');
+        const refreshToken = params.get('refresh_token');
+        const type = params.get('type');
+        
+        console.log("Hash params type:", type);
+        
+        // If we have recovery tokens, set the session
+        if (accessToken && type === 'recovery') {
+          console.log("Found recovery tokens, setting session");
+          
+          // Set the session with the tokens
+          const { data, error: sessionError } = await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken || '',
+          });
+          
+          if (sessionError) {
+            console.error("Error setting session:", sessionError);
+            throw sessionError;
+          }
+          
+          if (data?.session) {
+            console.log("Successfully established session");
+            setHasValidSession(true);
+            setUserEmail(data.session.user.email);
+            
+            // Clean the URL by removing the hash
+            if (window.history && window.history.replaceState) {
+              window.history.replaceState({}, document.title, window.location.pathname);
+            }
+          } else {
+            console.log("Failed to establish session from tokens");
+            setError("Unable to validate your reset link. Please request a new one.");
+          }
         } else {
-          console.log("No valid session found for password reset");
-          setError("Your password reset link has expired. Please request a new one.");
+          console.log("No valid recovery tokens found in URL");
+          setError("Your password reset link appears to be invalid. Please request a new one.");
         }
       } catch (err) {
-        console.error("Error checking session:", err);
-        setError("An error occurred while checking your reset request.");
+        console.error("Error processing auth tokens:", err);
+        setError("An error occurred while processing your reset link.");
       } finally {
         setIsValidatingSession(false);
       }
     }
     
-    checkSession();
+    processHashParams();
   }, []);
 
   async function handleResetPassword() {
@@ -115,7 +162,7 @@ export default function ResetPasswordScreen() {
   if (isValidatingSession) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text style={{ color: '#fff' }}>Verifying your password reset...</Text>
+        <Text style={{ color: '#fff' }}>Verifying your password reset link...</Text>
       </View>
     );
   }
