@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { Link, useRouter } from 'expo-router';
 import { resetPassword } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
@@ -23,11 +23,24 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
     
     try {
+      // Try the standard reset password flow
       const { error } = await resetPassword(email);
+      
       if (error) throw error;
-      setSuccessMessage('Password reset instructions have been sent to your email');
+      
+      // Show success message
+      setSuccessMessage('If an account exists with that email, password reset instructions will be sent. Please check both your inbox and spam folder.');
     } catch (error: any) {
-      setError(error.message || 'Failed to send password reset email');
+      console.error('Password reset error:', error);
+      
+      // Provide a more helpful error message for network issues
+      if (error.message?.includes('fetch') || 
+          error.message?.includes('network') || 
+          error.message?.includes('ERR_NAME_NOT_RESOLVED')) {
+        setError('Unable to connect to the authentication service. Please check your internet connection and try again later.');
+      } else {
+        setError(error.message || 'Failed to send password reset email');
+      }
     } finally {
       setLoading(false);
     }
