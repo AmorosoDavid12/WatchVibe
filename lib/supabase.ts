@@ -29,10 +29,7 @@ const ExpoSecureStoreAdapter = {
   },
 };
 
-const supabaseUrl = 'https://qnqnwjdwwqfgjkxnzqqz.supabase.co';
-const supabaseAnonKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFucW53amR3d3FmZ2preG56cXF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDg5MzYzMDcsImV4cCI6MjAyNDUxMjMwN30.yTwkEX1bG6UPzlL2oJSOWF__PuMRQZQ8gRR7BzJLPc0';
-
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+export const supabase = createClient(constants.SUPABASE_URL, 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InFucW53amR3d3FmZ2preG56cXF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3MDg5MzYzMDcsImV4cCI6MjAyNDUxMjMwN30.yTwkEX1bG6UPzlL2oJSOWF__PuMRQZQ8gRR7BzJLPc0', {
   auth: {
     storage: ExpoSecureStoreAdapter as any,
     autoRefreshToken: true,
@@ -63,13 +60,22 @@ export async function resetPassword(email: string) {
   // Sign out first to clear any existing sessions
   await supabase.auth.signOut();
   
-  // Construct a proper absolute URL for the callback
-  const redirectUrl = `${constants.APP_URL}/auth/callback`;
-  
-  // Send the password reset email
-  return await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: redirectUrl,
-  });
+  try {
+    // Determine if we're running on web
+    const isWeb = Platform.OS === 'web';
+    
+    // Get current origin for redirect URL
+    const redirectUrl = `${constants.APP_URL}/auth/callback`;
+    console.log('Using redirect URL:', redirectUrl);
+    
+    // Send the password reset email
+    return await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectUrl,
+    });
+  } catch (error) {
+    console.error('Error during password reset:', error);
+    throw error;
+  }
 }
 
 export async function updatePassword(password: string) {
@@ -82,7 +88,7 @@ export async function signInWithGoogle() {
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
-      redirectTo: process.env.EXPO_PUBLIC_APP_URL || 'http://localhost:8081',
+      redirectTo: constants.APP_URL,
       queryParams: {
         access_type: 'offline',
         prompt: 'consent',
