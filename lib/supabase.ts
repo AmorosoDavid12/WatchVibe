@@ -46,11 +46,13 @@ export const supabase = createClient(
         // Add headers to help with CORS if on web
         if (Platform.OS === 'web') {
           const [url, options = {}] = args;
+          // Ensure API key is included for REST API calls
           const fetchOptions = {
             ...options,
             headers: {
               ...options.headers,
               'Accept': 'application/json',
+              'apikey': constants.SUPABASE_ANON_KEY,
             },
           };
           return fetch(url, fetchOptions);

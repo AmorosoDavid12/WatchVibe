@@ -10,7 +10,7 @@ import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Settings, LogOut, Star } from 'lucide-react-native';
 import { Text, Button, Card, Avatar, ActivityIndicator, Divider, Surface } from 'react-native-paper';
-import { signOut } from '@/lib/supabase';
+import { logout } from '@/lib/supabase';
 
 interface WatchedItem {
   rating?: number;
@@ -91,7 +91,7 @@ export default function ProfileScreen() {
 
   async function handleSignOut() {
     try {
-      await signOut();
+      await logout();
       router.replace('/login');
     } catch (error) {
       console.error('Error signing out:', error);
