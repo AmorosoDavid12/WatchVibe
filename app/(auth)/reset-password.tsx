@@ -1,12 +1,13 @@
-import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
-import { updatePassword } from '@/lib/supabase';
+import React, { useState, useEffect } from 'react';
+import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
+import { useRouter, useSegments } from 'expo-router';
+import { updatePassword, supabase } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Lock } from 'lucide-react-native';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
+  const segments = useSegments();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -14,6 +15,38 @@ export default function ResetPasswordScreen() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [secureTextEntry, setSecureTextEntry] = useState(true);
   const [secureConfirmTextEntry, setSecureConfirmTextEntry] = useState(true);
+  const [hasProcessedHash, setHasProcessedHash] = useState(false);
+
+  // Process the hash in the URL to get the access token
+  useEffect(() => {
+    if (hasProcessedHash) return;
+
+    const processHashParams = async () => {
+      try {
+        if (Platform.OS === 'web') {
+          // Get hash from URL (e.g., #access_token=xyz&type=recovery)
+          const hash = window.location.hash;
+          if (hash && hash.includes('access_token')) {
+            // Process the hash - Supabase client has built-in handling
+            const { error } = await supabase.auth.getSession();
+            if (error) {
+              console.error('Error setting session:', error.message);
+              setError('Authentication session error. Please try requesting a new password reset link.');
+            } else {
+              setHasProcessedHash(true);
+            }
+          } else {
+            setError('Invalid or missing reset token. Please request a new password reset link.');
+          }
+        }
+      } catch (err) {
+        console.error('Error processing reset token:', err);
+        setError('Failed to process reset token. Please try again.');
+      }
+    };
+
+    processHashParams();
+  }, []);
 
   async function handleUpdatePassword() {
     if (!password || !confirmPassword) {
@@ -36,7 +69,11 @@ export default function ResetPasswordScreen() {
     setLoading(true);
     
     try {
-      const { error } = await updatePassword(password);
+      // Supabase updateUser will use the current session from the hash
+      const { error } = await supabase.auth.updateUser({
+        password: password
+      });
+      
       if (error) throw error;
       setSuccessMessage('Password has been updated successfully');
       
@@ -106,7 +143,7 @@ export default function ResetPasswordScreen() {
           onPress={handleUpdatePassword}
           style={styles.button}
           loading={loading}
-          disabled={loading}
+          disabled={loading || !!error}
         >
           Update Password
         </Button>
