@@ -74,9 +74,14 @@ export default function AuthCallbackPage() {
               await supabase.auth.signOut();
               console.log('Successfully signed out user');
               
-              // Redirect to reset password with special parameter
-              console.log('Redirecting to reset-password with recovery_verified=true');
-              router.replace('/reset-password?recovery_verified=true');
+              // Redirect to reset password with the token
+              // This allows the reset-password page to use the token directly
+              console.log('Redirecting to reset-password with recovery token');
+              if (token) {
+                router.replace(`/reset-password?recovery_verified=true&token=${token}&type=recovery`);
+              } else {
+                router.replace('/reset-password?recovery_verified=true');
+              }
               return;
             } catch (signOutErr) {
               console.error('Error signing out:', signOutErr);
