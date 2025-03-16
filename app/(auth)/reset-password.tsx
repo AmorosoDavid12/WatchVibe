@@ -16,6 +16,7 @@ export default function ResetPasswordScreen() {
   const [secureTextEntry, setSecureTextEntry] = useState(true);
   const [secureConfirmTextEntry, setSecureConfirmTextEntry] = useState(true);
   const [hasProcessedHash, setHasProcessedHash] = useState(false);
+  const [tokenExpired, setTokenExpired] = useState(false);
 
   // Process the hash in the URL to get the access token
   useEffect(() => {
@@ -24,19 +25,44 @@ export default function ResetPasswordScreen() {
     const processHashParams = async () => {
       try {
         if (Platform.OS === 'web') {
-          // Get hash from URL (e.g., #access_token=xyz&type=recovery)
+          // Get hash from URL
           const hash = window.location.hash;
+          
+          // Check for error in hash (like expired token)
+          if (hash && hash.includes('error=access_denied') && hash.includes('otp_expired')) {
+            setTokenExpired(true);
+            setError('Your password reset link has expired. Please request a new one.');
+            return;
+          }
+          
+          // Check for token in hash
           if (hash && hash.includes('access_token')) {
-            // Process the hash - Supabase client has built-in handling
-            const { error } = await supabase.auth.getSession();
-            if (error) {
-              console.error('Error setting session:', error.message);
-              setError('Authentication session error. Please try requesting a new password reset link.');
+            const hashParams = new URLSearchParams(hash.substring(1));
+            const accessToken = hashParams.get('access_token');
+            const refreshToken = hashParams.get('refresh_token');
+            const type = hashParams.get('type');
+            
+            if (accessToken && type === 'recovery') {
+              // Process the session with Supabase
+              const { data, error } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken || ''
+              });
+              
+              if (error) {
+                console.error('Error setting session:', error.message);
+                setError('Authentication session error. Please request a new password reset link.');
+              } else if (data?.session) {
+                setHasProcessedHash(true);
+                // Session set successfully
+              } else {
+                setError('Failed to establish an authentication session. Please request a new link.');
+              }
             } else {
-              setHasProcessedHash(true);
+              setError('Invalid reset token. Please request a new password reset link.');
             }
           } else {
-            setError('Invalid or missing reset token. Please request a new password reset link.');
+            setError('No reset token found. Please use the link from your email.');
           }
         }
       } catch (err) {
@@ -47,6 +73,11 @@ export default function ResetPasswordScreen() {
 
     processHashParams();
   }, []);
+
+  // Function to handle requesting a new reset link
+  const handleRequestNewLink = () => {
+    router.replace('/forgot-password');
+  };
 
   async function handleUpdatePassword() {
     if (!password || !confirmPassword) {
@@ -69,7 +100,16 @@ export default function ResetPasswordScreen() {
     setLoading(true);
     
     try {
-      // Supabase updateUser will use the current session from the hash
+      // First verify we have a valid session
+      const { data: sessionData } = await supabase.auth.getSession();
+      
+      if (!sessionData.session) {
+        setError('No active session found. Please use a new reset link from your email.');
+        setLoading(false);
+        return;
+      }
+      
+      // Supabase updateUser will use the current session
       const { error } = await supabase.auth.updateUser({
         password: password
       });
@@ -79,7 +119,10 @@ export default function ResetPasswordScreen() {
       
       // Redirect to login after 2 seconds
       setTimeout(() => {
-        router.replace('/login');
+        // Sign out first to clear the recovery session
+        supabase.auth.signOut().then(() => {
+          router.replace('/login');
+        });
       }, 2000);
     } catch (error: any) {
       setError(error.message || 'Failed to update password');
@@ -91,9 +134,13 @@ export default function ResetPasswordScreen() {
   return (
     <View style={styles.container}>
       <Surface style={styles.formContainer} elevation={2}>
-        <Text variant="headlineMedium" style={styles.title}>Create New Password</Text>
+        <Text variant="headlineMedium" style={styles.title}>
+          {tokenExpired ? 'Link Expired' : 'Create New Password'}
+        </Text>
         <Text variant="bodyLarge" style={styles.subtitle}>
-          Enter your new password below
+          {tokenExpired 
+            ? 'Your password reset link has expired'
+            : 'Enter your new password below'}
         </Text>
 
         {error && (
@@ -108,45 +155,59 @@ export default function ResetPasswordScreen() {
           </HelperText>
         )}
         
-        <TextInput
-          mode="outlined"
-          label="New Password"
-          value={password}
-          onChangeText={(text) => {
-            setPassword(text);
-            setError(null);
-          }}
-          style={styles.input}
-          secureTextEntry={secureTextEntry}
-          left={<TextInput.Icon icon={() => <Lock size={20} color="#888" />} />}
-          right={<TextInput.Icon icon={secureTextEntry ? "eye" : "eye-off"} onPress={() => setSecureTextEntry(!secureTextEntry)} />}
-          error={!!error && !password}
-        />
-        
-        <TextInput
-          mode="outlined"
-          label="Confirm New Password"
-          value={confirmPassword}
-          onChangeText={(text) => {
-            setConfirmPassword(text);
-            setError(null);
-          }}
-          style={styles.input}
-          secureTextEntry={secureConfirmTextEntry}
-          left={<TextInput.Icon icon={() => <Lock size={20} color="#888" />} />}
-          right={<TextInput.Icon icon={secureConfirmTextEntry ? "eye" : "eye-off"} onPress={() => setSecureConfirmTextEntry(!secureConfirmTextEntry)} />}
-          error={!!error && (!confirmPassword || password !== confirmPassword)}
-        />
-        
-        <Button 
-          mode="contained" 
-          onPress={handleUpdatePassword}
-          style={styles.button}
-          loading={loading}
-          disabled={loading || !!error}
-        >
-          Update Password
-        </Button>
+        {!tokenExpired ? (
+          <>
+            <TextInput
+              mode="outlined"
+              label="New Password"
+              value={password}
+              onChangeText={(text) => {
+                setPassword(text);
+                setError(null);
+              }}
+              style={styles.input}
+              secureTextEntry={secureTextEntry}
+              left={<TextInput.Icon icon={() => <Lock size={20} color="#888" />} />}
+              right={<TextInput.Icon icon={secureTextEntry ? "eye" : "eye-off"} onPress={() => setSecureTextEntry(!secureTextEntry)} />}
+              error={!!error && !password}
+              disabled={tokenExpired}
+            />
+            
+            <TextInput
+              mode="outlined"
+              label="Confirm New Password"
+              value={confirmPassword}
+              onChangeText={(text) => {
+                setConfirmPassword(text);
+                setError(null);
+              }}
+              style={styles.input}
+              secureTextEntry={secureConfirmTextEntry}
+              left={<TextInput.Icon icon={() => <Lock size={20} color="#888" />} />}
+              right={<TextInput.Icon icon={secureConfirmTextEntry ? "eye" : "eye-off"} onPress={() => setSecureConfirmTextEntry(!secureConfirmTextEntry)} />}
+              error={!!error && (!confirmPassword || password !== confirmPassword)}
+              disabled={tokenExpired}
+            />
+            
+            <Button 
+              mode="contained" 
+              onPress={handleUpdatePassword}
+              style={styles.button}
+              loading={loading}
+              disabled={loading || !!error || tokenExpired}
+            >
+              Update Password
+            </Button>
+          </>
+        ) : (
+          <Button 
+            mode="contained" 
+            onPress={handleRequestNewLink}
+            style={styles.button}
+          >
+            Request New Link
+          </Button>
+        )}
       </Surface>
     </View>
   );
