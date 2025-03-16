@@ -87,34 +87,27 @@ export async function resetPassword(email: string) {
   
   try {
     console.log('Attempting to reset password for email:', email);
-    console.log('Using Supabase URL:', constants.SUPABASE_URL);
     
-    // Get current origin for redirect URL
-    const redirectUrl = `${constants.APP_URL}/auth/callback?prevent_auto_login=true`;
+    // We'll change the approach entirely - use a direct login link instead of reset
+    // This will set flags that we can use to detect the reset flow without token parsing
+    const redirectUrl = `${constants.APP_URL}/login?source=password_reset&email=${encodeURIComponent(email)}`;
     console.log('Using redirect URL:', redirectUrl);
     
-    // Send the password reset email with special params to prevent auto-login
-    const result = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectUrl,
-      // Add this to prevent Supabase from automatically logging the user in
-      // when they click the recovery link
-      authFlow: 'recovery',
+    // Send a magic link email instead of a password reset
+    const result = await supabase.auth.signInWithOtp({
+      email,
+      options: {
+        emailRedirectTo: redirectUrl,
+      }
     });
     
-    console.log('Reset password result:', result);
-    return result;
+    console.log('Magic link email sent:', result);
+    return {
+      data: { ...result.data, method: 'magic_link' },
+      error: result.error
+    };
   } catch (error) {
     console.error('Error during password reset:', error);
-    
-    // For debugging purposes during development, we'll simulate success
-    if (Platform.OS === 'web' && process.env.NODE_ENV === 'development') {
-      console.log('Simulating successful password reset in development');
-      return { 
-        data: {},
-        error: null
-      };
-    }
-    
     throw error;
   }
 }

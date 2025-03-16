@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { Link, useRouter } from 'expo-router';
+import { View, StyleSheet, TouchableOpacity } from 'react-native';
+import { useRouter } from 'expo-router';
 import { resetPassword } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Mail, ArrowLeft } from 'lucide-react-native';
@@ -10,37 +10,24 @@ export default function ForgotPasswordScreen() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [emailSent, setEmailSent] = useState(false);
 
   async function handleResetPassword() {
     if (!email) {
-      setError('Please enter your email');
+      setError('Please enter your email address');
       return;
     }
 
     setError(null);
-    setSuccessMessage(null);
     setLoading(true);
-    
+
     try {
-      // Try the standard reset password flow
       const { error } = await resetPassword(email);
-      
       if (error) throw error;
       
-      // Show success message
-      setSuccessMessage('If an account exists with that email, password reset instructions will be sent. Please check both your inbox and spam folder.');
+      setEmailSent(true);
     } catch (error: any) {
-      console.error('Password reset error:', error);
-      
-      // Provide a more helpful error message for network issues
-      if (error.message?.includes('fetch') || 
-          error.message?.includes('network') || 
-          error.message?.includes('ERR_NAME_NOT_RESOLVED')) {
-        setError('Unable to connect to the authentication service. Please check your internet connection and try again later.');
-      } else {
-        setError(error.message || 'Failed to send password reset email');
-      }
+      setError(error.message || 'Failed to send reset email');
     } finally {
       setLoading(false);
     }
@@ -49,58 +36,65 @@ export default function ForgotPasswordScreen() {
   return (
     <View style={styles.container}>
       <Surface style={styles.formContainer} elevation={2}>
-        <TouchableOpacity 
-          style={styles.backButton} 
-          onPress={() => router.back()}
-        >
-          <ArrowLeft size={24} color="#888" />
-        </TouchableOpacity>
-      
-        <Text variant="headlineMedium" style={styles.title}>Reset Password</Text>
-        <Text variant="bodyLarge" style={styles.subtitle}>
-          Enter your email and we'll send you instructions to reset your password
+        <Text variant="headlineMedium" style={styles.title}>
+          Reset Password
         </Text>
 
-        {error && (
-          <HelperText type="error" visible={!!error}>
-            {error}
-          </HelperText>
+        {!emailSent ? (
+          <>
+            <Text variant="bodyLarge" style={styles.subtitle}>
+              Enter the email address associated with your account
+            </Text>
+
+            {error && (
+              <HelperText type="error" visible={!!error}>
+                {error}
+              </HelperText>
+            )}
+
+            <TextInput
+              mode="outlined"
+              label="Email"
+              value={email}
+              onChangeText={(text) => {
+                setEmail(text);
+                setError(null);
+              }}
+              style={styles.input}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              left={<TextInput.Icon icon={() => <Mail size={20} color="#888" />} />}
+              error={!!error && !email}
+            />
+
+            <Button 
+              mode="contained" 
+              onPress={handleResetPassword}
+              style={styles.button}
+              loading={loading}
+              disabled={loading}
+            >
+              Send Magic Link
+            </Button>
+          </>
+        ) : (
+          <>
+            <Text variant="bodyLarge" style={styles.successMessage}>
+              We've sent a magic link to <Text style={styles.emailText}>{email}</Text>.
+            </Text>
+            <Text style={styles.instructions}>
+              Please check your email and click on the link to set a new password.
+            </Text>
+          </>
         )}
 
-        {successMessage && (
-          <HelperText type="info" visible={!!successMessage} style={styles.successMessage}>
-            {successMessage}
-          </HelperText>
-        )}
-        
-        <TextInput
-          mode="outlined"
-          label="Email"
-          value={email}
-          onChangeText={(text) => {
-            setEmail(text);
-            setError(null);
-          }}
-          style={styles.input}
-          autoCapitalize="none"
-          keyboardType="email-address"
-          left={<TextInput.Icon icon={() => <Mail size={20} color="#888" />} />}
-          error={!!error && !email}
-        />
-        
-        <Button 
-          mode="contained" 
-          onPress={handleResetPassword}
-          style={styles.button}
-          loading={loading}
-          disabled={loading}
+        <TouchableOpacity 
+          onPress={() => router.push('/login')}
+          style={styles.backButton}
         >
-          Send Reset Instructions
-        </Button>
-
-        <Link href="/login" style={styles.link}>
-          <Text style={styles.linkText}>Back to Login</Text>
-        </Link>
+          <ArrowLeft size={20} color="#888" />
+          <Text style={styles.backButtonText}>Back to Login</Text>
+        </TouchableOpacity>
       </Surface>
     </View>
   );
@@ -117,44 +111,47 @@ const styles = StyleSheet.create({
     padding: 24,
     borderRadius: 12,
     backgroundColor: '#1a1a1a',
-    position: 'relative',
-  },
-  backButton: {
-    position: 'absolute',
-    top: 16,
-    left: 16,
-    zIndex: 1,
   },
   title: {
     fontWeight: 'bold',
     color: '#fff',
     textAlign: 'center',
-    marginTop: 16,
+    marginBottom: 16,
   },
   subtitle: {
     color: '#888',
     textAlign: 'center',
-    marginTop: 8,
     marginBottom: 24,
   },
   input: {
-    marginBottom: 16,
+    marginBottom: 24,
     backgroundColor: '#2a2a2a',
   },
   button: {
-    marginTop: 8,
+    marginBottom: 16,
     paddingVertical: 6,
   },
-  link: {
-    alignSelf: 'center',
-    marginTop: 24,
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
   },
-  linkText: {
+  backButtonText: {
     color: '#888',
-    fontSize: 14,
+    marginLeft: 8,
   },
   successMessage: {
     color: '#4CAF50',
+    textAlign: 'center',
     marginBottom: 16,
+  },
+  emailText: {
+    fontWeight: 'bold',
+  },
+  instructions: {
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 24,
   }
 }); 
