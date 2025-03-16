@@ -42,7 +42,7 @@ export const supabase = createClient(
     },
     // Add global fetch parameters to help with CORS
     global: {
-      fetch: (...args) => {
+      fetch: (...args: any[]) => {
         // Add headers to help with CORS if on web
         if (Platform.OS === 'web') {
           const [url, options = {}] = args;
@@ -57,7 +57,7 @@ export const supabase = createClient(
           };
           return fetch(url, fetchOptions);
         }
-        return fetch(...args);
+        return fetch(...args as [RequestInfo, RequestInit?]);
       }
     }
   }
@@ -88,11 +88,11 @@ export async function resetPassword(email: string) {
     
     console.log("Reset password for email:", email);
     
-    // Build the redirect URL to go directly to the reset password page
-    // Include parameters to prevent auto-login
+    // Use a two-step approach with a special route that will handle the token without auto-login
+    // First, redirect to our auth/password-reset-handler, which then redirects to reset-password
     const redirectUrl = typeof window !== 'undefined' 
-      ? `${window.location.origin}/reset-password?passwordReset=true&preventAutoLogin=true`
-      : 'http://localhost:8081/reset-password?passwordReset=true&preventAutoLogin=true';
+      ? `${window.location.origin}/auth/password-reset-handler`
+      : 'http://localhost:8081/auth/password-reset-handler';
     
     console.log("Using redirect URL:", redirectUrl);
     
