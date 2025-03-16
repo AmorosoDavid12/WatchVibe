@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
-import { useRouter, usePathname, useSegments } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
-import * as WebBrowser from 'expo-web-browser';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(true);
 
@@ -14,48 +14,74 @@ export default function AuthCallbackPage() {
     async function handleCallback() {
       try {
         setProcessing(true);
+        console.log('Auth callback - URL params:', params);
         
-        // Get the full URL including hash
+        // Get the full URL including query params
         const url = window.location.href;
+        console.log('Full URL:', url);
         
-        // Parse hash parameters
-        const hashParams = url.includes('#') ? 
-          Object.fromEntries(
-            url
-              .split('#')[1]
-              .split('&')
-              .map(pair => pair.split('='))
-          ) : {};
+        // Check if this is a recovery (password reset) flow
+        const isRecovery = params.type === 'recovery' || url.includes('type=recovery');
+        const urlParams = new URLSearchParams(window.location.search);
+        const token = params.token || urlParams.get('token');
         
-        // Handle different auth flows
-        if (hashParams.type === 'recovery') {
-          // Check for access_token which is needed for password reset
-          if (!hashParams.access_token) {
+        if (isRecovery) {
+          console.log('Detected password recovery flow');
+          
+          if (!token) {
             throw new Error('Password reset token not found in URL');
           }
           
-          // Set the session server-side with the access token
-          const { data, error: sessionError } = await supabase.auth.setSession({
-            access_token: hashParams.access_token,
-            refresh_token: hashParams.refresh_token || '',
-          });
-          
-          if (sessionError) {
-            console.error('Error setting session:', sessionError);
-            throw sessionError;
-          }
-          
-          // Check if we now have a valid session
+          // Check if we have a valid session from the auth redirect
           const { data: sessionData } = await supabase.auth.getSession();
-          if (!sessionData.session) {
-            throw new Error('Failed to create a valid session');
+          
+          if (sessionData?.session) {
+            console.log('Valid session detected for password reset');
+            // Redirect to the reset password page where user can set a new password
+            router.replace('/reset-password');
+          } else {
+            console.log('No valid session, attempting to exchange token for session');
+            // We might need to exchange the token for a session in some cases
+            try {
+              // This helps in some cases to create a valid recovery session
+              const { error: verifyError } = await supabase.auth.verifyOtp({
+                token_hash: token,
+                type: 'recovery',
+              });
+              
+              if (verifyError) {
+                console.error('Error verifying token:', verifyError);
+              }
+              
+              // Redirect to reset password page even if there was an error
+              // The reset page will handle checking for a valid session
+              router.replace('/reset-password');
+            } catch (err) {
+              console.error('Error with token verification:', err);
+              // Still try to redirect to reset password page
+              router.replace('/reset-password');
+            }
+          }
+        } else {
+          // Handle hash fragment for other auth types (like OAuth)
+          const hashParams = url.includes('#') ? 
+            Object.fromEntries(
+              url
+                .split('#')[1]
+                .split('&')
+                .map(pair => pair.split('='))
+            ) : {};
+            
+          // If we have an access token in the hash, try to set the session
+          if (hashParams.access_token) {
+            await supabase.auth.setSession({
+              access_token: hashParams.access_token,
+              refresh_token: hashParams.refresh_token || '',
+            });
           }
           
-          // If everything is successful, redirect to reset password page
-          router.replace('/reset-password');
-        } else {
-          // For other auth flows
-          router.replace('/login');
+          // For other auth flows, redirect to the home page
+          router.replace('/(tabs)');
         }
       } catch (err: any) {
         console.error('Error in auth callback:', err);
@@ -65,7 +91,7 @@ export default function AuthCallbackPage() {
     }
 
     handleCallback();
-  }, [router]);
+  }, [router, params]);
 
   if (error) {
     return (

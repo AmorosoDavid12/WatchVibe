@@ -16,6 +16,7 @@ export default function ResetPasswordScreen() {
   const [secureConfirmTextEntry, setSecureConfirmTextEntry] = useState(true);
   const [hasSession, setHasSession] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
+  const [passwordResetComplete, setPasswordResetComplete] = useState(false);
 
   // Check for password recovery event and session
   useEffect(() => {
@@ -23,6 +24,7 @@ export default function ResetPasswordScreen() {
       try {
         // Check if we have an active recovery session
         const { data: authData } = await supabase.auth.getSession();
+        console.log('Reset password page - Session check:', authData?.session ? 'Has session' : 'No session');
         
         if (authData?.session) {
           // We have a session, proceed with password reset
@@ -31,8 +33,10 @@ export default function ResetPasswordScreen() {
           // Also set up a listener for the PASSWORD_RECOVERY event
           const { data: { subscription } } = supabase.auth.onAuthStateChange(
             (event: any, session: any) => {
+              console.log('Auth event in reset password:', event);
               if (event === 'PASSWORD_RECOVERY') {
                 // Password recovery event, mark session as valid
+                console.log('PASSWORD_RECOVERY event detected');
                 setHasSession(true);
               }
             }
@@ -42,8 +46,8 @@ export default function ResetPasswordScreen() {
             subscription.unsubscribe();
           };
         } else {
-          // No session, show error
-          setError('No active session found. Please use a reset link from your email.');
+          // No session, show error and provide option to request new link
+          setError('No active session found. Please use a reset link from your email or request a new one.');
         }
       } catch (err) {
         console.error('Error checking session:', err);
@@ -82,13 +86,21 @@ export default function ResetPasswordScreen() {
     setLoading(true);
     
     try {
+      console.log('Attempting to update password');
+      
       // Update the password directly
       const { error } = await supabase.auth.updateUser({
         password: password
       });
       
-      if (error) throw error;
+      if (error) {
+        console.error('Error updating password:', error);
+        throw error;
+      }
+      
+      console.log('Password updated successfully');
       setSuccessMessage('Password has been updated successfully');
+      setPasswordResetComplete(true);
       
       // Redirect to login after 2 seconds
       setTimeout(() => {
@@ -98,6 +110,7 @@ export default function ResetPasswordScreen() {
         });
       }, 2000);
     } catch (error: any) {
+      console.error('Password update error:', error);
       setError(error.message || 'Failed to update password');
     } finally {
       setLoading(false);
@@ -116,12 +129,14 @@ export default function ResetPasswordScreen() {
     <View style={styles.container}>
       <Surface style={styles.formContainer} elevation={2}>
         <Text variant="headlineMedium" style={styles.title}>
-          {!hasSession ? 'Session Expired' : 'Create New Password'}
+          {!hasSession ? 'Session Expired' : (passwordResetComplete ? 'Password Updated' : 'Create New Password')}
         </Text>
         <Text variant="bodyLarge" style={styles.subtitle}>
           {!hasSession 
             ? 'Your session has expired or is invalid'
-            : 'Enter your new password below'}
+            : (passwordResetComplete 
+                ? 'Your password has been updated successfully' 
+                : 'Enter your new password below')}
         </Text>
 
         {error && (
@@ -136,7 +151,7 @@ export default function ResetPasswordScreen() {
           </HelperText>
         )}
         
-        {hasSession ? (
+        {hasSession && !passwordResetComplete ? (
           <>
             <TextInput
               mode="outlined"
@@ -178,7 +193,7 @@ export default function ResetPasswordScreen() {
               Update Password
             </Button>
           </>
-        ) : (
+        ) : !passwordResetComplete && (
           <Button 
             mode="contained" 
             onPress={handleRequestNewLink}
@@ -186,6 +201,12 @@ export default function ResetPasswordScreen() {
           >
             Request New Link
           </Button>
+        )}
+
+        {passwordResetComplete && (
+          <Text style={styles.redirectingText}>
+            Redirecting to login...
+          </Text>
         )}
       </Surface>
     </View>
@@ -229,5 +250,10 @@ const styles = StyleSheet.create({
   successMessage: {
     color: '#4CAF50',
     marginBottom: 16,
+  },
+  redirectingText: {
+    textAlign: 'center',
+    marginTop: 16,
+    color: '#888',
   }
 }); 
