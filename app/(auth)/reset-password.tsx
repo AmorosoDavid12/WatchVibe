@@ -19,7 +19,7 @@ export default function ResetPasswordScreen() {
   const [hasValidSession, setHasValidSession] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   
-  // Handle URL hash and establish session when component mounts
+  // First useEffect - Handle URL hash and establish session when component mounts
   useEffect(() => {
     async function processAuthState() {
       try {
@@ -165,16 +165,8 @@ export default function ResetPasswordScreen() {
     };
   }, []);
 
-  // Show loading state
-  if (isValidatingSession) {
-    return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={{ color: '#fff' }}>Verifying your password reset link...</Text>
-      </View>
-    );
-  }
-
-  // Add effect to block navigation during recovery session
+  // Second useEffect - Add effect to block navigation during recovery session
+  // IMPORTANT: This must be defined before any conditional returns
   useEffect(() => {
     if (hasValidSession && typeof window !== 'undefined' && localStorage.getItem('isRecoverySession') === 'true') {
       console.log("Blocking navigation during recovery session");
@@ -194,7 +186,19 @@ export default function ResetPasswordScreen() {
         window.removeEventListener('beforeunload', handleBeforeUnload);
       };
     }
+    
+    // Always return a cleanup function even if we don't add an event listener
+    return () => {};
   }, [hasValidSession]);
+
+  // Show loading state - IMPORTANT: This comes AFTER all hooks
+  if (isValidatingSession) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={{ color: '#fff' }}>Verifying your password reset link...</Text>
+      </View>
+    );
+  }
 
   async function handleResetPassword() {
     // Validate form fields
