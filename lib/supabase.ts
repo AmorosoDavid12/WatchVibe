@@ -82,27 +82,33 @@ export async function register(email: string, password: string) {
 }
 
 export async function resetPassword(email: string) {
-  // Sign out first to clear any existing sessions
-  await supabase.auth.signOut();
-  
   try {
-    console.log('Attempting to reset password for email:', email);
+    // Sign out first to clear any existing session
+    await supabase.auth.signOut();
     
-    // Build the redirect URL to our auth callback
-    // This will handle storing the token and redirecting
-    const redirectUrl = `${constants.APP_URL}/auth/callback?reset=true&email=${encodeURIComponent(email)}`;
-    console.log('Using redirect URL:', redirectUrl);
+    console.log("Reset password for email:", email);
     
-    // We'll use the standard resetPasswordForEmail but ensure our callback handles it properly
-    const result = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: redirectUrl,
+    // Build the redirect URL to go directly to the reset password page
+    const redirectUrl = typeof window !== 'undefined' 
+      ? `${window.location.origin}/reset-password`  // Direct to reset-password page
+      : 'http://localhost:8081/reset-password';     // Fallback for React Native
+    
+    console.log("Using redirect URL:", redirectUrl);
+    
+    // Send the reset password email
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: redirectUrl
     });
     
-    console.log('Reset password result:', result);
-    return result;
+    if (error) {
+      console.error("Reset password error:", error);
+      throw error;
+    }
+    
+    return { error: null };
   } catch (error) {
-    console.error('Error during password reset:', error);
-    throw error;
+    console.error("Reset password exception:", error);
+    return { error };
   }
 }
 
