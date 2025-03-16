@@ -18,83 +18,114 @@ export default function PasswordResetHandler() {
           return; // This only works on web
         }
         
-        // Clear any existing sessions immediately to prevent auto-login
-        await supabase.auth.signOut();
-        
         // Get URL parameters
         const url = window.location.href;
         console.log("PasswordResetHandler: URL =", url);
         
-        // Extract token from hash or search params
+        // First, get the user's session
+        const { data: sessionData } = await supabase.auth.getSession();
+        
+        // Check if user has a valid session from Supabase verification
+        if (sessionData?.session) {
+          console.log("PasswordResetHandler: User has a session from Supabase verification");
+          
+          // Store the email
+          if (sessionData.session.user?.email) {
+            localStorage.setItem('passwordResetEmail', sessionData.session.user.email);
+          }
+          
+          // Store user ID
+          if (sessionData.session.user?.id) {
+            localStorage.setItem('passwordResetUserId', sessionData.session.user.id);
+          }
+          
+          // Explicitly sign the user out to force password reset flow
+          console.log("PasswordResetHandler: Signing user out to force password reset flow");
+          await supabase.auth.signOut();
+          
+          // Redirect to reset password page with special recovery flag
+          setTimeout(() => {
+            router.replace('/reset-password?passwordReset=true&userVerified=true');
+          }, 100);
+          return;
+        }
+        
+        // If no auto-login session, try extraction methods...
         const hash = window.location.hash;
         const urlSearchParams = new URLSearchParams(window.location.search);
         
-        // First check for tokens in the URL hash (typical Supabase format)
-        let accessToken = null;
-        let refreshToken = null;
-        let type = null;
+        // Check for token_hash in URL (directly from email link)
+        const tokenHash = urlSearchParams.get('token_hash');
+        const type = urlSearchParams.get('type') || 'recovery';
         
-        if (hash && hash.includes('=')) {
+        // If we have a token_hash, use it to verify OTP
+        if (tokenHash) {
+          console.log("PasswordResetHandler: Found token_hash, verifying OTP");
+          
           try {
-            // Parse hash parameters
-            const hashParams = new URLSearchParams(hash.startsWith('#') ? hash.substring(1) : hash);
+            // Use verifyOtp to establish a session
+            const { data, error } = await supabase.auth.verifyOtp({
+              token_hash: tokenHash,
+              type: type as any
+            });
             
-            accessToken = hashParams.get('access_token');
-            refreshToken = hashParams.get('refresh_token');
-            type = hashParams.get('type');
+            if (error) {
+              console.error("PasswordResetHandler: OTP verification error:", error);
+              throw error;
+            }
             
-            console.log("PasswordResetHandler: Found tokens in hash:", !!accessToken, !!refreshToken);
-            console.log("PasswordResetHandler: Type:", type);
-          } catch (e) {
-            console.error("PasswordResetHandler: Error parsing hash", e);
+            if (data && data.session) {
+              console.log("PasswordResetHandler: Successfully verified OTP and established session");
+              
+              // Store the email for the reset password page
+              if (data.user?.email) {
+                localStorage.setItem('passwordResetEmail', data.user.email);
+              }
+              
+              // Store user ID
+              if (data.user?.id) {
+                localStorage.setItem('passwordResetUserId', data.user.id);
+              }
+              
+              // Sign out to force password reset flow
+              await supabase.auth.signOut();
+              
+              // Redirect to reset password page with flag indicating successful verification
+              setTimeout(() => {
+                router.replace('/reset-password?userVerified=true');
+              }, 100);
+              return;
+            }
+          } catch (verifyError) {
+            console.error("PasswordResetHandler: Error during OTP verification:", verifyError);
           }
         }
         
-        // Check URL search params for token
-        const tokenFromUrl = urlSearchParams.get('token');
-        const typeFromUrl = urlSearchParams.get('type');
-        
-        // Extract direct token from URL if present
+        // Check for direct token in URL (from verification link)
         let directToken = null;
         if (url.includes('token=')) {
           try {
             const tokenMatch = url.match(/token=([^&]+)/);
             if (tokenMatch && tokenMatch[1]) {
               directToken = tokenMatch[1];
-              console.log("PasswordResetHandler: Extracted direct token from URL");
+              console.log("PasswordResetHandler: Found direct token in URL");
+              localStorage.setItem('passwordResetDirectToken', directToken);
+              
+              // Let the reset password page handle this
+              setTimeout(() => {
+                router.replace('/reset-password?passwordReset=true&directToken=true');
+              }, 100);
+              return;
             }
           } catch (e) {
             console.error("PasswordResetHandler: Error extracting direct token", e);
           }
         }
         
-        // Determine which token to use
-        const token = tokenFromUrl || directToken;
-        const finalType = typeFromUrl || type;
-        
-        // Store tokens in localStorage
-        if (token) {
-          localStorage.setItem('passwordResetToken', token);
-          localStorage.setItem('passwordResetTimestamp', Date.now().toString());
-          
-          // Also store email if available
-          const email = urlSearchParams.get('email');
-          if (email) {
-            localStorage.setItem('passwordResetEmail', email);
-          }
-        }
-        
-        if (accessToken && refreshToken) {
-          localStorage.setItem('passwordResetAccessToken', accessToken);
-          localStorage.setItem('passwordResetRefreshToken', refreshToken);
-        }
-        
-        // Mark this as a special reset flow
-        localStorage.setItem('passwordResetSource', 'handlerBypass');
-        
-        // Redirect to the reset password page
+        // If we reached here, we couldn't find verification info
+        // Redirect to reset password page for fallback handling
         setTimeout(() => {
-          router.replace('/reset-password?passwordReset=true&bypassAuth=true');
+          router.replace('/reset-password?passwordReset=true&fallback=true');
         }, 100);
         
       } catch (error) {
