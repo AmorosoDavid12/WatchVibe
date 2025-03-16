@@ -19,6 +19,7 @@ export default function ResetPasswordScreen() {
   const [isValidResetRequest, setIsValidResetRequest] = useState(false);
   const [isCheckingReset, setIsCheckingReset] = useState(true);
   const [passwordResetComplete, setPasswordResetComplete] = useState(false);
+  const [hasSession, setHasSession] = useState(false);
   
   // Check if this is a valid password reset request
   useEffect(() => {
@@ -26,60 +27,112 @@ export default function ResetPasswordScreen() {
       try {
         console.log("ResetPassword: Checking for valid reset request");
         
-        let resetToken = null;
-        let resetEmail = null;
-        
-        // Check if this is a direct link to the reset-password page with token in URL
-        // This handles the case where the redirect_to points directly to reset-password
-        if (typeof window !== 'undefined') {
-          const urlParams = new URLSearchParams(window.location.search);
+        // First check if there's a hash in the URL with tokens
+        if (typeof window !== 'undefined' && window.location.hash) {
+          console.log("ResetPassword: Found hash in URL");
+          const hash = window.location.hash.substring(1); // Remove the # character
+          const params = new URLSearchParams(hash);
           
-          // Check for token in URL query params
-          const tokenFromUrl = 
-            urlParams.get('token') || 
-            params.token as string || 
-            null;
+          // Check if we have access and refresh tokens
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+          const type = params.get('type');
+          
+          if (accessToken && refreshToken && type === 'recovery') {
+            console.log("ResetPassword: Found access and refresh tokens in hash for recovery");
             
-          // Check for type=recovery in URL
-          const typeFromUrl = 
-            urlParams.get('type') === 'recovery' || 
-            params.type === 'recovery' || 
-            false;
-            
-          // If we have a token and it's a recovery, store it
-          if (tokenFromUrl && typeFromUrl) {
-            console.log("ResetPassword: Found token directly in URL");
-            resetToken = tokenFromUrl;
-            
-            // Store in localStorage for future use
-            localStorage.setItem('passwordResetToken', tokenFromUrl);
-            localStorage.setItem('passwordResetTimestamp', Date.now().toString());
-            
-            // Also store any email if available
-            const emailFromUrl = urlParams.get('email') || params.email as string;
-            if (emailFromUrl) {
-              resetEmail = emailFromUrl;
-              localStorage.setItem('passwordResetEmail', emailFromUrl);
+            // Try to set the session with these tokens
+            try {
+              const { data, error } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken
+              });
+              
+              if (error) {
+                console.error("ResetPassword: Error setting session from tokens:", error);
+              } else if (data?.session) {
+                console.log("ResetPassword: Successfully set session from tokens");
+                
+                // Get user email from session
+                if (data.session.user?.email) {
+                  setEmail(data.session.user.email);
+                  localStorage.setItem('passwordResetEmail', data.session.user.email);
+                }
+                
+                // Store these tokens in localStorage for later use
+                localStorage.setItem('passwordResetAccessToken', accessToken);
+                localStorage.setItem('passwordResetRefreshToken', refreshToken);
+                localStorage.setItem('passwordResetTimestamp', Date.now().toString());
+                
+                setHasSession(true);
+                setIsValidResetRequest(true);
+                setIsCheckingReset(false);
+                return;
+              }
+            } catch (sessionError) {
+              console.error("ResetPassword: Exception setting session:", sessionError);
             }
           }
         }
         
-        // Standard flow - check URL parameters and localStorage
-        if (!resetToken && typeof window !== 'undefined') {
-          // Check for passwordReset flag
-          const passwordResetParam = params.passwordReset === 'true';
-          const urlParams = new URLSearchParams(window.location.search);
-          const urlPasswordReset = urlParams.get('passwordReset') === 'true';
-          const isPasswordReset = passwordResetParam || urlPasswordReset;
+        // If we couldn't set a session from URL hash, check localStorage and other methods
+        let resetToken = null;
+        let resetEmail = null;
+        let hasAccessToken = false;
+        
+        if (typeof window !== 'undefined') {
+          // Check for stored access and refresh tokens
+          const accessToken = localStorage.getItem('passwordResetAccessToken');
+          const refreshToken = localStorage.getItem('passwordResetRefreshToken');
           
-          console.log("ResetPassword: passwordReset param:", isPasswordReset);
+          if (accessToken && refreshToken) {
+            console.log("ResetPassword: Found stored access and refresh tokens");
+            hasAccessToken = true;
+            
+            // Try to set the session with these tokens
+            try {
+              const { data, error } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken
+              });
+              
+              if (!error && data?.session) {
+                console.log("ResetPassword: Successfully set session from stored tokens");
+                
+                // Get user email from session
+                if (data.session.user?.email) {
+                  setEmail(data.session.user.email);
+                }
+                
+                setHasSession(true);
+                setIsValidResetRequest(true);
+                setIsCheckingReset(false);
+                return;
+              }
+            } catch (sessionError) {
+              console.error("ResetPassword: Exception setting session from stored tokens:", sessionError);
+            }
+          }
           
-          // Check localStorage for stored token and email
-          resetToken = resetToken || localStorage.getItem('passwordResetToken');
-          resetEmail = resetEmail || localStorage.getItem('passwordResetEmail');
-          const resetTimestamp = localStorage.getItem('passwordResetTimestamp');
+          // Check for token and email in localStorage
+          resetToken = localStorage.getItem('passwordResetToken');
+          resetEmail = localStorage.getItem('passwordResetEmail');
           
-          console.log("ResetPassword: Found token in localStorage:", !!resetToken);
+          // Check if we have a session already
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session) {
+            console.log("ResetPassword: Found existing session");
+            
+            // Get user email from session
+            if (sessionData.session.user?.email) {
+              setEmail(sessionData.session.user.email);
+            }
+            
+            setHasSession(true);
+            setIsValidResetRequest(true);
+            setIsCheckingReset(false);
+            return;
+          }
         }
         
         // If we have a reset email, use it
@@ -104,9 +157,9 @@ export default function ResetPasswordScreen() {
           }
         }
         
-        // If we have a token, consider it valid
-        if (resetToken) {
-          console.log("ResetPassword: Found valid reset token");
+        // If we have either a token or access tokens, consider it valid
+        if (resetToken || hasAccessToken) {
+          console.log("ResetPassword: Found valid reset token or access tokens");
           setIsValidResetRequest(true);
           setIsCheckingReset(false);
           return;
@@ -153,105 +206,99 @@ export default function ResetPasswordScreen() {
     setLoading(true);
     
     try {
-      // If email is empty, try to get it from localStorage
-      const userEmail = email || localStorage.getItem('passwordResetEmail');
-      
-      if (!userEmail) {
-        setError('Email address is required to reset your password');
-        setLoading(false);
-        return;
-      }
-      
       // Use the simplest approach to update the password
-      console.log("ResetPassword: Updating password for email:", userEmail);
+      console.log("ResetPassword: Updating password");
       
-      // Get the token from localStorage
-      const resetToken = localStorage.getItem('passwordResetToken');
+      // If we have a session, we can update the password directly
+      const { error } = await supabase.auth.updateUser({
+        password: password
+      });
       
-      if (!resetToken) {
-        setError('Reset token not found. Please request a new password reset link.');
-        setLoading(false);
-        return;
-      }
-      
-      // Update user password directly with the Auth API
-      console.log("ResetPassword: Sending reset password request");
-      
-      // First try to sign in using OTP (one-time password) with the token
-      try {
-        const { error } = await supabase.auth.updateUser({
-          password: password
-        });
-        
-        if (error) {
-          // If updating fails with current session, try creating a new session
-          if (error.message.includes('session')) {
-            console.log("ResetPassword: No session, trying to sign in with OTP");
+      if (error) {
+        console.error("ResetPassword: Error updating password:", error);
+        // If it's a session error but we know we should have a session, try one more time
+        if (error.message.includes('session') && hasSession) {
+          console.log("ResetPassword: Session error but we should have a session, trying again");
+          
+          // Try to refresh the session from localStorage tokens
+          const accessToken = localStorage.getItem('passwordResetAccessToken');
+          const refreshToken = localStorage.getItem('passwordResetRefreshToken');
+          
+          if (accessToken && refreshToken) {
+            console.log("ResetPassword: Setting session from stored tokens");
             
-            // Try signing in with OTP
-            const { error: otpError } = await supabase.auth.verifyOtp({
-              email: userEmail,
-              token: resetToken,
-              type: 'recovery'
+            // Try to set the session with these tokens
+            const { error: sessionError } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken
             });
             
-            if (otpError) {
-              throw otpError;
-            }
-            
-            // After verifying OTP, try updating password again
-            const { error: updateError } = await supabase.auth.updateUser({
-              password: password
-            });
-            
-            if (updateError) {
-              throw updateError;
+            if (!sessionError) {
+              console.log("ResetPassword: Successfully refreshed session, trying password update again");
+              
+              // Try updating the password again
+              const { error: updateError } = await supabase.auth.updateUser({
+                password: password
+              });
+              
+              if (updateError) {
+                throw updateError;
+              } else {
+                // Success!
+                handlePasswordUpdateSuccess();
+                return;
+              }
+            } else {
+              throw sessionError;
             }
           } else {
-            throw error;
+            throw new Error("Session tokens not found");
           }
-        }
-        
-        // Password update successful
-        console.log("ResetPassword: Password updated successfully");
-        setSuccessMessage('Password has been updated successfully');
-        setPasswordResetComplete(true);
-        
-        // Clean up localStorage
-        if (typeof window !== 'undefined') {
-          localStorage.removeItem('passwordResetToken');
-          localStorage.removeItem('passwordResetData');
-          localStorage.removeItem('passwordResetEmail');
-          localStorage.removeItem('passwordResetTimestamp');
-        }
-        
-        // Wait a moment before redirecting to login
-        setTimeout(() => {
-          // Sign out first to clear any session
-          supabase.auth.signOut().then(() => {
-            router.replace('/login');
-          });
-        }, 2000);
-        
-      } catch (error: any) {
-        console.error("ResetPassword: Error updating password:", error);
-        
-        // Special handling for rate limit errors
-        if (error.message && error.message.includes('security purposes')) {
-          setError('Too many requests. Please wait a minute and try again.');
-        } else if (error.message && error.message.includes('expired')) {
-          setError('Your reset link has expired. Please request a new one.');
         } else {
-          setError(error.message || 'Failed to update password');
+          throw error;
         }
-        
-        setLoading(false);
+      } else {
+        // Success!
+        handlePasswordUpdateSuccess();
+        return;
       }
     } catch (error: any) {
       console.error("ResetPassword: Error in password update:", error);
-      setError(error.message || 'An unexpected error occurred');
+      
+      // Special handling for rate limit errors
+      if (error.message && error.message.includes('security purposes')) {
+        setError('Too many requests. Please wait a minute and try again.');
+      } else if (error.message && (error.message.includes('expired') || error.message.includes('invalid'))) {
+        setError('Your reset link has expired or is invalid. Please request a new one.');
+      } else {
+        setError(error.message || 'Failed to update password');
+      }
+      
       setLoading(false);
     }
+  }
+  
+  function handlePasswordUpdateSuccess() {
+    console.log("ResetPassword: Password updated successfully");
+    setSuccessMessage('Password has been updated successfully');
+    setPasswordResetComplete(true);
+    
+    // Clean up localStorage
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('passwordResetToken');
+      localStorage.removeItem('passwordResetAccessToken');
+      localStorage.removeItem('passwordResetRefreshToken');
+      localStorage.removeItem('passwordResetEmail');
+      localStorage.removeItem('passwordResetTimestamp');
+    }
+    
+    // Wait a moment before redirecting to login
+    setTimeout(() => {
+      // Sign out first to clear any session
+      supabase.auth.signOut().then(() => {
+        router.replace('/login');
+      });
+    }, 2000);
   }
 
   if (isCheckingReset) {
