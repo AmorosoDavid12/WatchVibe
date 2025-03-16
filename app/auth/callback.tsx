@@ -24,8 +24,9 @@ export default function AuthCallbackPage() {
         const urlSearchParams = new URLSearchParams(window.location.search);
         const token = urlSearchParams.get('token');
         const type = urlSearchParams.get('type');
+        const preventAutoLogin = urlSearchParams.get('prevent_auto_login') === 'true';
         
-        console.log('URL Search Params - token:', !!token, 'type:', type);
+        console.log('URL Search Params - token:', !!token, 'type:', type, 'preventAutoLogin:', preventAutoLogin);
         
         // Then check hash params (for other auth flows)
         const hashParams = url.includes('#') ? 
@@ -64,8 +65,8 @@ export default function AuthCallbackPage() {
           
           // For verification links, we need to redirect directly to reset-password
           // WITHOUT setting the session first (which would log the user in)
-          if (type === 'recovery' && token) {
-            console.log('Detected direct verification link, redirecting to reset-password');
+          if ((type === 'recovery' && token) || preventAutoLogin) {
+            console.log('Detected direct verification link or prevent_auto_login, redirecting to reset-password');
             router.replace('/reset-password');
             return;
           }

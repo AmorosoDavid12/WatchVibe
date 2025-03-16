@@ -26,9 +26,37 @@ export default function ResetPasswordScreen() {
         // Check URL search params for a direct verification link
         if (typeof window !== 'undefined') {
           console.log('Checking for direct verification token in URL');
+          
+          // Check if we have a token from previous verification
+          // This happens when Supabase has already processed the token
+          // and redirected to our callback, which then redirected here
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData?.session) {
+            console.log('Found existing session, user likely already verified');
+            setHasSession(true);
+            setIsCheckingSession(false);
+            return;
+          }
+          
+          // Try to extract token either from our URL or from URL hash
           const urlSearchParams = new URLSearchParams(window.location.search);
           const token = urlSearchParams.get('token');
           const type = urlSearchParams.get('type');
+          
+          // Also check hash parameters in case they're there
+          const url = window.location.href;
+          const hashParams = url.includes('#') ? 
+            Object.fromEntries(
+              url
+                .split('#')[1]
+                .split('&')
+                .map(pair => pair.split('='))
+            ) : {};
+          
+          const accessToken = hashParams.access_token;
+          
+          console.log('Reset-password: URL params check - token:', !!token, 'type:', type);
+          console.log('Reset-password: Hash params check - access_token:', !!accessToken);
           
           if (token && type === 'recovery') {
             console.log('Found direct verification token');
@@ -52,6 +80,23 @@ export default function ResetPasswordScreen() {
             } finally {
               setIsCheckingSession(false);
             }
+            return;
+          } else if (accessToken) {
+            // Try to set session with the access token
+            console.log('Setting session with hash access token');
+            const { error: sessionError } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: hashParams.refresh_token || '',
+            });
+            
+            if (sessionError) {
+              console.error('Error setting session:', sessionError);
+              setError('Invalid or expired session token. Please request a new reset link.');
+            } else {
+              console.log('Session set successfully');
+              setHasSession(true);
+            }
+            setIsCheckingSession(false);
             return;
           }
         }

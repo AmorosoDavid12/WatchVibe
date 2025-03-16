@@ -90,12 +90,15 @@ export async function resetPassword(email: string) {
     console.log('Using Supabase URL:', constants.SUPABASE_URL);
     
     // Get current origin for redirect URL
-    const redirectUrl = `${constants.APP_URL}/auth/callback`;
+    const redirectUrl = `${constants.APP_URL}/auth/callback?prevent_auto_login=true`;
     console.log('Using redirect URL:', redirectUrl);
     
-    // Send the password reset email
+    // Send the password reset email with special params to prevent auto-login
     const result = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: redirectUrl,
+      // Add this to prevent Supabase from automatically logging the user in
+      // when they click the recovery link
+      authFlow: 'recovery',
     });
     
     console.log('Reset password result:', result);
