@@ -59,31 +59,33 @@ export default function AuthCallbackPage() {
         if (isRecovery) {
           console.log('Handling password recovery flow');
           
-          // For password reset, we will preserve the session that Supabase creates
-          // but redirect to the reset password page
+          // For password reset, we extract the token from the URL and store it temporarily
+          // This approach works around Supabase's token invalidation after use
           if ((type === 'recovery' && token) || preventAutoLogin) {
-            console.log('Detected recovery flow, checking session');
+            console.log('Detected recovery flow, extracting token');
             
             try {
-              // Get session info to verify the token was valid
-              const { data: sessionData } = await supabase.auth.getSession();
-              const hasSession = !!sessionData?.session;
-              console.log('Session present after recovery flow:', hasSession);
+              // Get the token from the URL
+              const recoveryToken = token || urlSearchParams.get('token');
               
-              if (hasSession) {
-                // We have a valid session, redirect to reset-password
-                console.log('Valid session established, redirecting to reset-password');
-                router.replace('/reset-password?recovery_verified=true');
+              if (recoveryToken) {
+                console.log('Recovery token found, storing for reset');
+                // Store token in localStorage for the reset page to use
+                if (typeof window !== 'undefined') {
+                  localStorage.setItem('recovery_token', recoveryToken);
+                  console.log('Token stored in localStorage');
+                }
+                
+                // Redirect to reset-password page
+                router.replace('/reset-password?source=direct_recovery');
               } else {
-                // No session, the token might be invalid
-                console.error('No session established, token may be invalid');
-                router.replace('/reset-password?error=invalid_token');
+                console.error('No recovery token found in URL');
+                router.replace('/reset-password?error=missing_token');
               }
               return;
             } catch (err) {
-              console.error('Error checking session:', err);
-              // Still try to redirect to reset password
-              router.replace('/reset-password');
+              console.error('Error handling recovery flow:', err);
+              router.replace('/reset-password?error=process_error');
               return;
             }
           }
