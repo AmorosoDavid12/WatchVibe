@@ -20,6 +20,7 @@ export default function ResetPasswordScreen() {
   const [isCheckingReset, setIsCheckingReset] = useState(true);
   const [passwordResetComplete, setPasswordResetComplete] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [directToken, setDirectToken] = useState<string | null>(null);
   
   // Check if this is a valid password reset request
   useEffect(() => {
@@ -35,6 +36,7 @@ export default function ResetPasswordScreen() {
         // Get info from localStorage
         const storedEmail = localStorage.getItem('passwordResetEmail');
         const storedUserId = localStorage.getItem('passwordResetUserId');
+        const storedDirectToken = localStorage.getItem('passwordResetDirectToken');
         
         // Set user info if available
         if (storedEmail) {
@@ -43,6 +45,10 @@ export default function ResetPasswordScreen() {
         
         if (storedUserId) {
           setUserId(storedUserId);
+        }
+        
+        if (storedDirectToken) {
+          setDirectToken(storedDirectToken);
         }
         
         // Check for userVerified flag from password-reset-handler
@@ -55,8 +61,8 @@ export default function ResetPasswordScreen() {
         }
         
         // Check for direct token from a verification link
-        const directToken = params.directToken === 'true';
-        if (directToken) {
+        const hasDirectToken = params.directToken === 'true' || !!storedDirectToken;
+        if (hasDirectToken) {
           console.log("ResetPassword: Direct token was found and stored");
           setIsValidResetRequest(true);
           setIsCheckingReset(false);
@@ -132,64 +138,120 @@ export default function ResetPasswordScreen() {
     try {
       console.log("ResetPassword: Starting password update");
       
-      // Try the admin update method first if we have a user ID
-      if (userId) {
-        console.log("ResetPassword: Using userId to update password:", userId);
-        
-        // For user ID approach, we need to make our own API call to the backend
-        // since user isn't logged in and needs admin privileges
-        // This will be a placeholder - in a real implementation, you'd make a call to your server
-        
-        // For now, we'll check if the user can sign in with the stored email and then update
-        if (email) {
-          try {
-            // First try to request a new password reset and get a fresh token
-            const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
-              redirectTo: window.location.origin + '/auth/password-reset-handler'
-            });
-            
-            if (resetError) {
-              console.error("ResetPassword: Error requesting new reset:", resetError);
-              throw resetError;
+      // Try to establish a new session using the stored credentials
+      let session = null;
+      
+      // Method 1: Use the direct token if available
+      if (directToken && email) {
+        try {
+          console.log("ResetPassword: Attempting to authenticate with direct token");
+          
+          // Try to get code from URL hash if available (from Supabase redirects)
+          let code = null;
+          if (typeof window !== 'undefined' && window.location.hash) {
+            const hash = window.location.hash.substring(1);
+            const params = new URLSearchParams(hash);
+            code = params.get('code');
+            if (code) {
+              console.log("ResetPassword: Found code in hash");
+              
+              // Exchange code for session
+              try {
+                const { data, error } = await supabase.auth.exchangeCodeForSession(code);
+                if (!error && data.session) {
+                  console.log("ResetPassword: Successfully exchanged code for session");
+                  session = data.session;
+                } else {
+                  console.error("ResetPassword: Error exchanging code for session:", error);
+                }
+              } catch (e) {
+                console.error("ResetPassword: Exception exchanging code:", e);
+              }
             }
-            
-            // Show a success message - the user will need to check their email again
-            console.log("ResetPassword: Sent a new password reset email");
-            setSuccessMessage("We've sent you a new password reset link. Please check your email to complete the reset process.");
-            setPasswordResetComplete(true);
-            
-            // Clean up localStorage
-            cleanupLocalStorage();
-            
-            // Wait before redirecting
-            setTimeout(() => {
-              router.replace('/login');
-            }, 5000);
-            
-            return;
-          } catch (e) {
-            console.error("ResetPassword: Error in email reset flow:", e);
-            throw e;
           }
+          
+          // If the code exchange didn't work, try a simpler approach - sign in with OTP
+          if (!session) {
+            console.log("ResetPassword: Unable to exchange code, trying direct sign-in");
+            // Just try updating the password directly
+            const { error: updateError } = await supabase.auth.updateUser({ password });
+            
+            if (!updateError) {
+              // Success! Skip to the success handler
+              console.log("ResetPassword: Direct password update successful!");
+              handlePasswordUpdateSuccess();
+              return;
+            } else {
+              console.error("ResetPassword: Direct update failed:", updateError);
+            }
+          }
+        } catch (e) {
+          console.error("ResetPassword: Error in direct token authentication:", e);
         }
       }
       
-      // If no user ID or the above approach failed, try standard password reset
+      // Method 2: Try signing in with passwordless OTP
+      if (!session && email) {
+        try {
+          console.log("ResetPassword: Attempting passwordless authentication with email");
+          
+          // First try to see if we can update password without sign-in
+          const { error: updateError } = await supabase.auth.updateUser({ password });
+          
+          if (!updateError) {
+            // Success! Skip to the success handler
+            console.log("ResetPassword: Direct password update succeeded!");
+            handlePasswordUpdateSuccess();
+            return;
+          }
+          
+          console.log("ResetPassword: Direct update failed, will try email OTP");
+          
+          // Try signing in with OTP
+          const { error: signInError } = await supabase.auth.signInWithOtp({
+            email: email,
+            options: {
+              shouldCreateUser: false // Only allow existing users
+            }
+          });
+          
+          if (signInError) {
+            console.error("ResetPassword: OTP sign in error:", signInError);
+          } else {
+            // Successfully sent OTP email
+            console.log("ResetPassword: OTP email sent successfully, showing message to user");
+            setSuccessMessage("We've sent a link to your email. Please check your inbox to verify your identity and then try again.");
+            setLoading(false);
+            return;
+          }
+        } catch (e) {
+          console.error("ResetPassword: Error in passwordless authentication:", e);
+        }
+      }
+      
+      // If all of the above methods failed but we have enough info, try direct password reset API
       if (email) {
-        console.log("ResetPassword: Sending new password reset email to:", email);
-        
-        // Request a new password reset email
+        // As a last resort, send them a new password reset email with a specific message
         const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
           redirectTo: window.location.origin + '/auth/password-reset-handler'
         });
         
         if (resetError) {
+          // Check if it's a rate limit error
+          if (resetError.message && resetError.message.includes('security purposes')) {
+            throw resetError; // Let the catch handler deal with this
+          }
+          
           console.error("ResetPassword: Error requesting password reset:", resetError);
           throw resetError;
         }
         
-        console.log("ResetPassword: Password reset email sent successfully");
-        setSuccessMessage("We've sent you a new password reset link. Please check your email to complete the reset process.");
+        // Show a success message with clearer instructions
+        console.log("ResetPassword: Password reset email sent as fallback");
+        setSuccessMessage(
+          "We were unable to directly update your password. We've sent you a new reset link by email. " +
+          "Please check your inbox and click the link to complete the reset process."
+        );
         setPasswordResetComplete(true);
         
         // Clean up localStorage
@@ -203,7 +265,7 @@ export default function ResetPasswordScreen() {
         return;
       }
       
-      // If we get here, we couldn't update the password
+      // If we reach here, we couldn't update the password
       setError("Unable to update your password. Please request a new reset link.");
       setLoading(false);
       
@@ -221,6 +283,23 @@ export default function ResetPasswordScreen() {
       
       setLoading(false);
     }
+  }
+  
+  function handlePasswordUpdateSuccess() {
+    console.log("ResetPassword: Password updated successfully");
+    setSuccessMessage('Your password has been updated successfully!');
+    setPasswordResetComplete(true);
+    
+    // Clean up localStorage
+    cleanupLocalStorage();
+    
+    // Wait a moment before redirecting to login
+    setTimeout(() => {
+      // Sign out first to clear any session
+      supabase.auth.signOut().then(() => {
+        router.replace('/login');
+      });
+    }, 3000);
   }
   
   function cleanupLocalStorage() {
@@ -244,13 +323,13 @@ export default function ResetPasswordScreen() {
     <View style={styles.container}>
       <Surface style={styles.formContainer} elevation={2}>
         <Text variant="headlineMedium" style={styles.title}>
-          {!isValidResetRequest ? 'Reset Link Expired' : (passwordResetComplete ? 'Check Your Email' : 'Create New Password')}
+          {!isValidResetRequest ? 'Reset Link Expired' : (passwordResetComplete ? 'Password Updated' : 'Create New Password')}
         </Text>
         <Text variant="bodyLarge" style={styles.subtitle}>
           {!isValidResetRequest 
             ? 'Your reset link has expired or is invalid'
             : (passwordResetComplete 
-                ? 'Please check your email for a secure link to set your new password' 
+                ? 'Your password has been successfully reset' 
                 : 'Enter your new password below')}
         </Text>
 
