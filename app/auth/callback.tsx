@@ -65,6 +65,13 @@ export default function AuthCallbackPage() {
             console.log('Detected recovery flow, signing out first');
             
             try {
+              // Get the token from the URL, and make sure we have it for the redirect
+              const tokenToPass = token || 
+                urlSearchParams.get('token') ||
+                (hashParams.token || hashParams.access_token || '');
+              
+              console.log('Token to pass to reset page:', !!tokenToPass);
+              
               // Get session info first to verify it was a valid token
               const { data: sessionData } = await supabase.auth.getSession();
               const hadSession = !!sessionData?.session;
@@ -74,12 +81,12 @@ export default function AuthCallbackPage() {
               await supabase.auth.signOut();
               console.log('Successfully signed out user');
               
-              // Redirect to reset password with the token
-              // This allows the reset-password page to use the token directly
-              console.log('Redirecting to reset-password with recovery token');
-              if (token) {
-                router.replace(`/reset-password?recovery_verified=true&token=${token}&type=recovery`);
+              // Always include the token in the redirect to reset password
+              if (tokenToPass) {
+                console.log('Redirecting with token to reset password page');
+                router.replace(`/reset-password?recovery_verified=true&token=${encodeURIComponent(tokenToPass)}&type=recovery`);
               } else {
+                console.log('No token available for redirect, using recovery_verified only');
                 router.replace('/reset-password?recovery_verified=true');
               }
               return;

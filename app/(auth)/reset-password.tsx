@@ -29,23 +29,31 @@ export default function ResetPasswordScreen() {
           
           const urlSearchParams = new URLSearchParams(window.location.search);
           const recoveryVerified = urlSearchParams.get('recovery_verified') === 'true';
+          const token = urlSearchParams.get('token');
+          const type = urlSearchParams.get('type');
           
-          console.log('Reset-password params - recovery_verified:', recoveryVerified);
+          console.log('Reset-password params - recovery_verified:', recoveryVerified, 'token:', !!token, 'type:', type);
           
-          if (recoveryVerified) {
-            console.log('Recovery verified by callback, enabling password reset form');
+          // First check if we have a token directly in the URL
+          if (token) {
+            console.log('Found token in URL, storing for reset');
+            setRecoveryToken(token);
             setHasResetToken(true);
             setIsCheckingToken(false);
             return;
           }
           
-          // Check URL for token
-          const token = urlSearchParams.get('token');
-          const type = urlSearchParams.get('type');
-          
-          if (token && type === 'recovery') {
-            console.log('Found direct recovery token, storing for reset');
-            setRecoveryToken(token);
+          // Then check if we're verified from callback
+          if (recoveryVerified) {
+            console.log('Recovery verified by callback, enabling password reset');
+            // Check for session as the callback may have established one
+            const { data: sessionData } = await supabase.auth.getSession();
+            if (sessionData?.session) {
+              console.log('Found session with recovery_verified');
+            } else {
+              console.log('No session with recovery_verified, may need token');
+            }
+            
             setHasResetToken(true);
             setIsCheckingToken(false);
             return;
@@ -119,9 +127,66 @@ export default function ResetPasswordScreen() {
     
     try {
       console.log('Attempting to update password');
-      let success = false;
       
-      // First try using the session approach if we have one
+      // Try to get the token again if we don't have it yet
+      if (!recoveryToken && typeof window !== 'undefined') {
+        const urlParams = new URLSearchParams(window.location.search);
+        const tokenFromUrl = urlParams.get('token');
+        if (tokenFromUrl) {
+          console.log('Found token in URL during password update');
+          setRecoveryToken(tokenFromUrl);
+        }
+      }
+      
+      // For direct token-based password reset
+      const tokenFromUrl = typeof window !== 'undefined' 
+        ? new URLSearchParams(window.location.search).get('token')
+        : null;
+      
+      const tokenToUse = recoveryToken || tokenFromUrl;
+      
+      if (tokenToUse) {
+        console.log('Attempting to verify token and update password');
+        
+        // First verify the token
+        const { error: verifyError } = await supabase.auth.verifyOtp({
+          token_hash: tokenToUse,
+          type: 'recovery',
+        });
+        
+        if (verifyError) {
+          console.error('Error verifying OTP:', verifyError);
+          throw new Error('Your reset link is invalid or has expired. Please request a new one.');
+        }
+        
+        console.log('Token verified successfully, updating password');
+        
+        // Now update the password
+        const { error: updateError } = await supabase.auth.updateUser({
+          password: password
+        });
+        
+        if (updateError) {
+          console.error('Error updating password:', updateError);
+          throw updateError;
+        }
+        
+        console.log('Password updated successfully');
+        setSuccessMessage('Password has been updated successfully');
+        setPasswordResetComplete(true);
+        
+        // Sign out and redirect to login after 2 seconds
+        setTimeout(() => {
+          // Sign out to ensure clean state
+          supabase.auth.signOut().then(() => {
+            router.replace('/login');
+          });
+        }, 2000);
+        
+        return;
+      }
+      
+      // Fallback to session-based update if we don't have a token
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData?.session) {
         console.log('Using session to update password');
@@ -129,56 +194,25 @@ export default function ResetPasswordScreen() {
           password: password
         });
         
-        if (!error) {
-          success = true;
-        } else {
-          console.error('Error updating password with session:', error);
-          // Continue to try the recovery token approach
-        }
-      }
-      
-      // If session approach failed or we don't have a session, try the recovery token approach
-      if (!success && recoveryToken) {
-        console.log('Using recovery token to update password');
-        // We can use the recovery token directly with verifyOtp and updateUser
-        const { error } = await supabase.auth.verifyOtp({
-          token_hash: recoveryToken,
-          type: 'recovery',
-        });
-        
         if (error) {
-          console.error('Error verifying OTP:', error);
-          throw new Error('Your reset link is invalid or has expired. Please request a new one.');
+          console.error('Error updating password with session:', error);
+          throw error;
         }
         
-        // Now that OTP is verified, we can update the password
-        const { error: updateError } = await supabase.auth.updateUser({
-          password: password
-        });
+        console.log('Password updated successfully with session');
+        setSuccessMessage('Password has been updated successfully');
+        setPasswordResetComplete(true);
         
-        if (updateError) {
-          console.error('Error updating password with token:', updateError);
-          throw updateError;
-        }
-        
-        success = true;
-      }
-      
-      if (!success) {
+        // Sign out and redirect to login after 2 seconds
+        setTimeout(() => {
+          // Sign out to ensure clean state
+          supabase.auth.signOut().then(() => {
+            router.replace('/login');
+          });
+        }, 2000);
+      } else {
         throw new Error('No valid session or recovery token found. Please request a new reset link.');
       }
-      
-      console.log('Password updated successfully');
-      setSuccessMessage('Password has been updated successfully');
-      setPasswordResetComplete(true);
-      
-      // Sign out and redirect to login after 2 seconds
-      setTimeout(() => {
-        // Sign out to ensure clean state
-        supabase.auth.signOut().then(() => {
-          router.replace('/login');
-        });
-      }, 2000);
     } catch (error: any) {
       console.error('Password update error:', error);
       setError(error.message || 'Failed to update password');
