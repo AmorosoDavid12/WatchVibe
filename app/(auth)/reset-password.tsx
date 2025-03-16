@@ -27,6 +27,22 @@ export default function ResetPasswordScreen() {
         if (typeof window !== 'undefined') {
           console.log('Checking for direct verification token in URL');
           
+          const urlSearchParams = new URLSearchParams(window.location.search);
+          const token = urlSearchParams.get('token');
+          const type = urlSearchParams.get('type');
+          const recoveryVerified = urlSearchParams.get('recovery_verified') === 'true';
+          
+          console.log('Reset-password params - token:', !!token, 'type:', type, 'recovery_verified:', recoveryVerified);
+          
+          // If we have recovery_verified=true from the callback, we can skip session checks
+          // and go straight to showing the password reset form
+          if (recoveryVerified) {
+            console.log('Recovery verified by callback, enabling password reset form');
+            setHasSession(true);
+            setIsCheckingSession(false);
+            return;
+          }
+          
           // Check if we have a token from previous verification
           // This happens when Supabase has already processed the token
           // and redirected to our callback, which then redirected here
@@ -39,11 +55,6 @@ export default function ResetPasswordScreen() {
           }
           
           // Try to extract token either from our URL or from URL hash
-          const urlSearchParams = new URLSearchParams(window.location.search);
-          const token = urlSearchParams.get('token');
-          const type = urlSearchParams.get('type');
-          
-          // Also check hash parameters in case they're there
           const url = window.location.href;
           const hashParams = url.includes('#') ? 
             Object.fromEntries(
@@ -195,23 +206,35 @@ export default function ResetPasswordScreen() {
     try {
       console.log('Attempting to update password');
       
-      // Update the password directly
-      const { error } = await supabase.auth.updateUser({
-        password: password
-      });
+      // First check if we already have a session
+      const { data: sessionData } = await supabase.auth.getSession();
+      const hasExistingSession = !!sessionData?.session;
+      console.log('Existing session found:', hasExistingSession);
       
-      if (error) {
-        console.error('Error updating password:', error);
-        throw error;
+      // Update the user password
+      if (hasExistingSession) {
+        // If we have a session (which might be the case after a token verification),
+        // we can update the password directly
+        const { error } = await supabase.auth.updateUser({
+          password: password
+        });
+        
+        if (error) {
+          console.error('Error updating password:', error);
+          throw error;
+        }
+      } else {
+        // No session available, show error
+        throw new Error('No valid session found. Please use a valid reset link and try again.');
       }
       
       console.log('Password updated successfully');
       setSuccessMessage('Password has been updated successfully');
       setPasswordResetComplete(true);
       
-      // Redirect to login after 2 seconds
+      // Sign out and redirect to login after 2 seconds
       setTimeout(() => {
-        // Sign out first to clear the recovery session
+        // Sign out to clear the recovery session
         supabase.auth.signOut().then(() => {
           router.replace('/login');
         });

@@ -59,19 +59,34 @@ export default function AuthCallbackPage() {
         if (isRecovery) {
           console.log('Handling password recovery flow');
           
-          if (!accessToken) {
-            throw new Error('Password reset token not found in URL');
-          }
-          
-          // For verification links, we need to redirect directly to reset-password
-          // WITHOUT setting the session first (which would log the user in)
+          // For password reset, we need to immediately sign the user out
+          // This prevents the automatic login behavior from Supabase
           if ((type === 'recovery' && token) || preventAutoLogin) {
-            console.log('Detected direct verification link or prevent_auto_login, redirecting to reset-password');
-            router.replace('/reset-password');
-            return;
+            console.log('Detected recovery flow, signing out first');
+            
+            try {
+              // Get session info first to verify it was a valid token
+              const { data: sessionData } = await supabase.auth.getSession();
+              const hadSession = !!sessionData?.session;
+              console.log('Session present before signout:', hadSession);
+              
+              // Sign out to clear the session Supabase automatically created
+              await supabase.auth.signOut();
+              console.log('Successfully signed out user');
+              
+              // Redirect to reset password with special parameter
+              console.log('Redirecting to reset-password with recovery_verified=true');
+              router.replace('/reset-password?recovery_verified=true');
+              return;
+            } catch (signOutErr) {
+              console.error('Error signing out:', signOutErr);
+              // Still try to redirect to reset password
+              router.replace('/reset-password');
+              return;
+            }
           }
           
-          // For hash fragments with access tokens
+          // If we have an access token in the hash, try to set the session
           if (hashParams.access_token) {
             console.log('Setting session with hash access token');
             // We may need to set the session to get access
