@@ -198,166 +198,173 @@ export default function ResetPasswordScreen() {
           });
         }, 2000);
       } else {
-        // No session, try using stored token
-        console.log("ResetPassword: No session, trying with stored token");
+        // No session, use a simpler approach
+        console.log("ResetPassword: No session found, using direct approach");
         
-        if (typeof window !== 'undefined') {
-          // Get token data from localStorage
-          const accessToken = localStorage.getItem('passwordResetToken');
-          const resetData = localStorage.getItem('passwordResetData');
+        if (!email) {
+          setError('Email address is required to reset your password');
+          setLoading(false);
+          return;
+        }
+        
+        // Instead of trying multiple approaches that could trigger rate limits,
+        // we'll use a simpler two-step process:
+        
+        // 1. Sign in with the email to establish a session
+        console.log("ResetPassword: Signing in with email to establish session");
+        const { error: signInError } = await supabase.auth.signInWithPassword({
+          email: email,
+          password: password // Even if this is wrong, we're just trying to use their existing password
+        });
+        
+        // If sign-in worked, we can update the password
+        if (!signInError) {
+          console.log("ResetPassword: Sign-in successful, updating password");
+          const { error: updateError } = await supabase.auth.updateUser({
+            password: password
+          });
           
-          if (accessToken) {
-            console.log("ResetPassword: Found token in localStorage, using for reset");
+          if (updateError) {
+            throw updateError;
+          }
+          
+          console.log("ResetPassword: Password updated successfully after sign-in");
+          setSuccessMessage('Password has been updated successfully');
+          setPasswordResetComplete(true);
+          
+          // Clean up localStorage
+          if (typeof window !== 'undefined') {
+            localStorage.removeItem('passwordResetToken');
+            localStorage.removeItem('passwordResetData');
+            localStorage.removeItem('passwordResetEmail');
+            localStorage.removeItem('passwordResetTimestamp');
+          }
+          
+          // Redirect to login after 2 seconds
+          setTimeout(() => {
+            router.replace('/login');
+          }, 2000);
+          return;
+        }
+        
+        // If sign-in didn't work, try a different approach
+        console.log("ResetPassword: Sign-in unsuccessful, trying alternative approach");
+        
+        // 2. Use the direct Supabase API to update password
+        try {
+          // Get access and refresh tokens from localStorage if available
+          const accessToken = localStorage.getItem('passwordResetToken');
+          let hash = null;
+          
+          if (typeof window !== 'undefined') {
+            // Try to get the complete hash from the URL if available
+            const hashFragment = window.location.hash;
+            if (hashFragment && hashFragment.includes('access_token')) {
+              hash = hashFragment;
+            }
             
-            try {
-              // Extract hash with token from resetData if available
-              const hashWithToken = resetData ? JSON.parse(resetData)?.hash : null;
-              console.log("ResetPassword: Hash with token found:", !!hashWithToken);
-              
-              // Completely different approach - use the passwordRecovery flow
-              console.log("ResetPassword: Using password recovery flow");
-              
-              // First try to create/verify a recovery session
-              let verifyError = null;
-              
+            // Or try to get it from localStorage
+            const resetData = localStorage.getItem('passwordResetData');
+            if (resetData) {
               try {
-                // Use the full hash if available as it includes type=recovery
-                if (hashWithToken) {
-                  console.log("ResetPassword: Verifying OTP with hash");
-                  // Clean the hash if needed
-                  const cleanHash = hashWithToken.startsWith('#') ? hashWithToken.substring(1) : hashWithToken;
-                  
-                  // Extract the token from the hash
-                  const hashParams = new URLSearchParams(cleanHash);
-                  const tokenFromHash = hashParams.get('access_token');
-                  
-                  // Verify OTP with token hash and type
-                  const { error } = await supabase.auth.verifyOtp({
-                    token_hash: tokenFromHash || accessToken,
-                    type: 'recovery'
-                  });
-                  
-                  if (error) {
-                    console.error("ResetPassword: Hash verification error:", error);
-                    verifyError = error;
-                  } else {
-                    console.log("ResetPassword: Hash verification succeeded");
-                  }
-                } else {
-                  // Fallback to trying just the token
-                  console.log("ResetPassword: Verifying OTP with token only");
-                  
-                  // Verify OTP with token
-                  const { error } = await supabase.auth.verifyOtp({
-                    token_hash: accessToken,
-                    type: 'recovery'
-                  });
-                  
-                  if (error) {
-                    console.error("ResetPassword: Token verification error:", error);
-                    verifyError = error;
-                  } else {
-                    console.log("ResetPassword: Token verification succeeded");
-                  }
+                const parsedData = JSON.parse(resetData);
+                if (parsedData.hash) {
+                  hash = parsedData.hash;
                 }
               } catch (e) {
-                console.error("ResetPassword: OTP verification exception:", e);
-                verifyError = e;
+                console.error("ResetPassword: Error parsing stored hash", e);
               }
+            }
+          }
+          
+          // If we have a hash, use it to extract tokens and establish session
+          if (hash) {
+            console.log("ResetPassword: Using hash to establish session");
+            const hashParams = new URLSearchParams(
+              hash.startsWith('#') ? hash.substring(1) : hash
+            );
+            
+            const accessToken = hashParams.get('access_token');
+            const refreshToken = hashParams.get('refresh_token');
+            
+            if (accessToken && refreshToken) {
+              console.log("ResetPassword: Found access and refresh tokens in hash");
+              // Set the session directly
+              const { error: sessionError } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken
+              });
               
-              // Now try with the recovery method - use the email + password combination
-              // This approach does not require an existing session
-              console.log("ResetPassword: Using recovery with email and password");
-              try {
-                // Email is required for this approach
-                if (!email) {
-                  throw new Error("Email is required for password reset");
-                }
-                
-                // Complete the recovery flow
-                const { error: recoveryError, data } = await supabase.auth.resetPasswordForEmail(
-                  email, 
-                  {
-                    redirectTo: `${window.location.origin}/login`,
-                  }
-                );
-                
-                if (recoveryError) {
-                  console.error("ResetPassword: Recovery error:", recoveryError);
-                  throw recoveryError;
-                }
-                
-                console.log("ResetPassword: Recovery initiated successfully", data);
-                
-                // Now we can try to update the password
-                // Try to use signIn to establish a session first
-                console.log("ResetPassword: Attempting signIn with OTP");
-                const { error: signInError, data: signInData } = await supabase.auth.signInWithOtp({
-                  email: email,
-                  options: {
-                    shouldCreateUser: false,
-                  }
-                });
-                
-                if (signInError) {
-                  console.error("ResetPassword: SignIn error:", signInError);
-                } else {
-                  console.log("ResetPassword: SignIn successful", signInData);
-                }
-                
-                // Finally update the password directly
-                console.log("ResetPassword: Attempting to update password directly");
+              if (!sessionError) {
+                console.log("ResetPassword: Session established, updating password");
                 const { error: updateError } = await supabase.auth.updateUser({
-                  password: password,
+                  password: password
                 });
                 
-                if (updateError) {
-                  // Special case for session errors - try one more approach
-                  if (updateError.message.includes('session')) {
-                    console.log("ResetPassword: Session error, trying alternate method");
-                    // Try a different approach - use the password recovery token to reset directly
-                    // Supabase might need a specific approach for this scenario
-                    // This is a fallback plan
-                    throw updateError; // For now, propagate the error and let user try again
-                  } else {
-                    throw updateError;
-                  }
+                if (updateError) throw updateError;
+                
+                console.log("ResetPassword: Password updated successfully with established session");
+                setSuccessMessage('Password has been updated successfully');
+                setPasswordResetComplete(true);
+                
+                // Clean up localStorage
+                if (typeof window !== 'undefined') {
+                  localStorage.removeItem('passwordResetToken');
+                  localStorage.removeItem('passwordResetData');
+                  localStorage.removeItem('passwordResetEmail');
+                  localStorage.removeItem('passwordResetTimestamp');
                 }
-              } catch (recoveryError) {
-                throw recoveryError;
+                
+                // Redirect to login after 2 seconds
+                setTimeout(() => {
+                  supabase.auth.signOut().then(() => {
+                    router.replace('/login');
+                  });
+                }, 2000);
+                return;
+              } else {
+                console.error("ResetPassword: Error setting session", sessionError);
               }
-              
-              console.log("ResetPassword: Password updated successfully");
-              setSuccessMessage('Password has been updated successfully');
-              setPasswordResetComplete(true);
-              
-              // Clean up localStorage
-              localStorage.removeItem('passwordResetToken');
-              localStorage.removeItem('passwordResetData');
-              localStorage.removeItem('passwordResetEmail');
-              localStorage.removeItem('passwordResetTimestamp');
-              
-              // Redirect to login after 2 seconds
-              setTimeout(() => {
-                router.replace('/login');
-              }, 2000);
-            } catch (apiError: any) {
-              console.error("ResetPassword: API error:", apiError);
-              setError(apiError.message || 'Error updating password. Please try again.');
-              setLoading(false);
+            }
+          }
+          
+          // Final fallback: send a new reset password email and inform the user
+          console.log("ResetPassword: All approaches failed, sending a new reset link");
+          const { error: resetError } = await supabase.auth.resetPasswordForEmail(
+            email, 
+            {
+              redirectTo: `${window.location.origin}/reset-password`
+            }
+          );
+          
+          if (resetError) {
+            // Check if it's a rate limit error
+            if (resetError.message && resetError.message.includes('security purposes')) {
+              setError('Too many requests. Please wait a minute and try again.');
+            } else {
+              throw resetError;
             }
           } else {
-            setError('No valid reset token found. Please request a new reset link.');
+            setError(null);
+            setSuccessMessage('A new password reset link has been sent to your email. Please check your inbox.');
             setLoading(false);
           }
-        } else {
-          setError('Unable to complete password reset. Please try again.');
+        } catch (finalError: any) {
+          console.error("ResetPassword: Final error", finalError);
+          setError(finalError.message || 'Error updating password. Please request a new reset link.');
           setLoading(false);
         }
       }
     } catch (error: any) {
       console.error("ResetPassword: Error updating password:", error);
-      setError(error.message || 'Failed to update password');
+      
+      // Special handling for rate limit errors
+      if (error.message && error.message.includes('security purposes')) {
+        setError('Too many requests. Please wait a minute and try again.');
+      } else {
+        setError(error.message || 'Failed to update password');
+      }
+      
       setLoading(false);
     }
   }
