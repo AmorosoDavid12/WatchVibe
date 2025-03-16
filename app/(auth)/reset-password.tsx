@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Lock, ArrowLeft } from 'lucide-react-native';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -20,7 +21,7 @@ export default function ResetPasswordScreen() {
   
   // Handle URL hash and establish session when component mounts
   useEffect(() => {
-    async function processHashParams() {
+    async function processAuthState() {
       try {
         // Only run in web environment
         if (typeof window === 'undefined') {
@@ -28,75 +29,140 @@ export default function ResetPasswordScreen() {
           return;
         }
         
-        console.log("Processing URL hash for auth tokens");
+        console.log("Processing auth state for password reset");
+        
+        // Check URL search params first (new approach)
+        const urlParams = new URLSearchParams(window.location.search);
+        const isPasswordReset = urlParams.get('type') === 'recovery';
+        
+        if (isPasswordReset) {
+          console.log("Detected recovery in URL params");
+          
+          // We need to wait for Supabase to process the token and establish a session
+          const { data } = await supabase.auth.getSession();
+          
+          if (data?.session) {
+            console.log("Valid session established from recovery token");
+            setHasValidSession(true);
+            setUserEmail(data.session.user.email || null);
+            setIsValidatingSession(false);
+            return;
+          }
+        }
+        
+        // Check localStorage (set by callback.tsx)
+        if (localStorage.getItem('hasValidSession') === 'true') {
+          const email = localStorage.getItem('passwordResetEmail');
+          const timestamp = localStorage.getItem('passwordResetTimestamp');
+          
+          // Check if the reset link is still valid (1 hour)
+          if (timestamp && (Date.now() - parseInt(timestamp)) < 3600000) {
+            console.log("Found valid session data in localStorage", email);
+            setHasValidSession(true);
+            setUserEmail(email || null);
+            setIsValidatingSession(false);
+            return;
+          } else {
+            // Clear expired data
+            localStorage.removeItem('hasValidSession');
+            localStorage.removeItem('passwordResetEmail');
+            localStorage.removeItem('passwordResetTimestamp');
+          }
+        }
         
         // Get hash fragment (without the # character)
         const hash = window.location.hash.substring(1);
         
-        if (!hash) {
-          // No hash parameters - check if we already have a session
-          const { data } = await supabase.auth.getSession();
-          if (data?.session) {
-            console.log("Valid session found without hash params");
-            setHasValidSession(true);
-            setUserEmail(data.session.user.email);
-          } else {
-            console.log("No hash params and no valid session");
-            setError("Your password reset link has expired. Please request a new one.");
+        if (hash) {
+          // Parse hash params
+          const params = new URLSearchParams(hash);
+          const accessToken = params.get('access_token');
+          const refreshToken = params.get('refresh_token');
+          const type = params.get('type');
+          
+          console.log("Hash params type:", type);
+          
+          // If we have recovery tokens, set the session
+          if (accessToken && type === 'recovery') {
+            console.log("Found recovery tokens, setting session");
+            
+            // Set the session with the tokens
+            const { data, error: sessionError } = await supabase.auth.setSession({
+              access_token: accessToken,
+              refresh_token: refreshToken || '',
+            });
+            
+            if (sessionError) {
+              console.error("Error setting session:", sessionError);
+              throw sessionError;
+            }
+            
+            if (data?.session) {
+              console.log("Successfully established session from hash");
+              setHasValidSession(true);
+              setUserEmail(data.session.user.email || null);
+              
+              // Store in localStorage for redundancy
+              localStorage.setItem('hasValidSession', 'true');
+              localStorage.setItem('passwordResetEmail', data.session.user.email || '');
+              localStorage.setItem('passwordResetTimestamp', Date.now().toString());
+              
+              // Clean the URL by removing the hash
+              if (window.history && window.history.replaceState) {
+                window.history.replaceState({}, document.title, window.location.pathname);
+              }
+              
+              setIsValidatingSession(false);
+              return;
+            }
           }
-          setIsValidatingSession(false);
-          return;
         }
         
-        // Parse hash params
-        const params = new URLSearchParams(hash);
-        const accessToken = params.get('access_token');
-        const refreshToken = params.get('refresh_token');
-        const type = params.get('type');
-        
-        console.log("Hash params type:", type);
-        
-        // If we have recovery tokens, set the session
-        if (accessToken && type === 'recovery') {
-          console.log("Found recovery tokens, setting session");
-          
-          // Set the session with the tokens
-          const { data, error: sessionError } = await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken || '',
-          });
-          
-          if (sessionError) {
-            console.error("Error setting session:", sessionError);
-            throw sessionError;
-          }
-          
-          if (data?.session) {
-            console.log("Successfully established session");
-            setHasValidSession(true);
-            setUserEmail(data.session.user.email);
-            
-            // Clean the URL by removing the hash
-            if (window.history && window.history.replaceState) {
-              window.history.replaceState({}, document.title, window.location.pathname);
-            }
-          } else {
-            console.log("Failed to establish session from tokens");
-            setError("Unable to validate your reset link. Please request a new one.");
-          }
+        // Last resort: check if we have a valid session already
+        const { data } = await supabase.auth.getSession();
+        if (data?.session) {
+          console.log("Found existing valid session");
+          setHasValidSession(true);
+          setUserEmail(data.session.user.email || null);
         } else {
-          console.log("No valid recovery tokens found in URL");
-          setError("Your password reset link appears to be invalid. Please request a new one.");
+          console.log("No valid session found through any method");
+          setError("Your password reset link has expired or is invalid. Please request a new one.");
         }
       } catch (err) {
-        console.error("Error processing auth tokens:", err);
+        console.error("Error processing auth state:", err);
         setError("An error occurred while processing your reset link.");
       } finally {
         setIsValidatingSession(false);
       }
     }
     
-    processHashParams();
+    // Set up auth state change listener
+    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
+      console.log(`Auth state changed: ${event}`);
+      
+      if (event === 'PASSWORD_RECOVERY') {
+        console.log('Password recovery event detected');
+        
+        if (session?.user?.email) {
+          setHasValidSession(true);
+          setUserEmail(session.user.email || null);
+          setIsValidatingSession(false);
+          
+          // Store in localStorage
+          localStorage.setItem('hasValidSession', 'true');
+          localStorage.setItem('passwordResetEmail', session.user.email);
+          localStorage.setItem('passwordResetTimestamp', Date.now().toString());
+        }
+      }
+    });
+    
+    processAuthState();
+    
+    return () => {
+      if (authListener && authListener.subscription) {
+        authListener.subscription.unsubscribe();
+      }
+    };
   }, []);
 
   async function handleResetPassword() {
@@ -130,6 +196,11 @@ export default function ResetPasswordScreen() {
       
       // Success!
       setSuccessMessage('Your password has been updated successfully!');
+      
+      // Clear localStorage data
+      localStorage.removeItem('hasValidSession');
+      localStorage.removeItem('passwordResetEmail');
+      localStorage.removeItem('passwordResetTimestamp');
       
       // Wait a moment before redirecting to login
       setTimeout(() => {
