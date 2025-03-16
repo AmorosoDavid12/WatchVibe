@@ -3,11 +3,12 @@ import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
-import { Lock } from 'lucide-react-native';
+import { Lock, ArrowLeft } from 'lucide-react-native';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [loading, setLoading] = useState(false);
@@ -15,85 +16,83 @@ export default function ResetPasswordScreen() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   const [secureTextEntry, setSecureTextEntry] = useState(true);
   const [secureConfirmTextEntry, setSecureConfirmTextEntry] = useState(true);
-  const [hasResetToken, setHasResetToken] = useState(false);
-  const [isCheckingToken, setIsCheckingToken] = useState(true);
+  const [isValidResetRequest, setIsValidResetRequest] = useState(false);
+  const [isCheckingReset, setIsCheckingReset] = useState(true);
   const [passwordResetComplete, setPasswordResetComplete] = useState(false);
-  const [recoveryToken, setRecoveryToken] = useState<string | null>(null);
   
-  // Check for reset token in localStorage
+  // Check if this is a valid password reset request
   useEffect(() => {
-    const checkForRecoveryToken = async () => {
+    const checkResetRequest = async () => {
       try {
+        console.log("ResetPassword: Checking for valid reset request");
+        
         if (typeof window !== 'undefined') {
-          console.log('Checking for recovery token');
+          // Check URL parameters first
+          const urlParams = new URLSearchParams(window.location.search);
+          const isPasswordReset = urlParams.get('passwordReset') === 'true';
+          console.log("ResetPassword: passwordReset param:", isPasswordReset);
           
-          // IMPORTANT: First check if we have an active session and sign out
-          // This ensures we don't show "already logged in" state
-          const checkSession = await supabase.auth.getSession();
-          if (checkSession?.data?.session) {
-            console.log('Active session detected on reset password page, signing out');
-            await supabase.auth.signOut();
+          // Check localStorage for token and other data
+          const resetToken = localStorage.getItem('passwordResetToken');
+          const resetData = localStorage.getItem('passwordResetData');
+          const resetEmail = localStorage.getItem('passwordResetEmail');
+          const resetTimestamp = localStorage.getItem('passwordResetTimestamp');
+          
+          console.log("ResetPassword: Found token in localStorage:", !!resetToken);
+          console.log("ResetPassword: Found reset data:", !!resetData);
+          
+          // If we have a reset email, use it
+          if (resetEmail) {
+            console.log("ResetPassword: Using stored email:", resetEmail);
+            setEmail(resetEmail);
           }
           
-          const urlSearchParams = new URLSearchParams(window.location.search);
-          const source = urlSearchParams.get('source');
-          const errorParam = urlSearchParams.get('error');
-          
-          console.log('Reset-password params - source:', source, 'error:', errorParam);
-          
-          // Check for specific error conditions
-          if (errorParam) {
-            let errorMessage = 'Your reset link has expired or is invalid. Please request a new one.';
+          // Check if reset token is still valid (less than 1 hour old)
+          if (resetTimestamp) {
+            const timestampAge = Date.now() - parseInt(resetTimestamp);
+            const isTimestampValid = timestampAge < 3600000; // 1 hour in milliseconds
+            console.log("ResetPassword: Token age (minutes):", Math.floor(timestampAge / 60000));
+            console.log("ResetPassword: Token still valid:", isTimestampValid);
             
-            if (errorParam === 'missing_token') {
-              errorMessage = 'No recovery token was found in your reset link. Please request a new one.';
-            } else if (errorParam === 'process_error') {
-              errorMessage = 'There was an error processing your reset link. Please try again.';
-            }
-            
-            console.error('Error detected in URL params:', errorParam);
-            setError(errorMessage);
-            setIsCheckingToken(false);
-            return;
-          }
-          
-          // Check for token in localStorage if we came from direct recovery
-          if (source === 'direct_recovery') {
-            const storedToken = localStorage.getItem('recovery_token');
-            
-            if (storedToken) {
-              console.log('Found recovery token in localStorage');
-              setRecoveryToken(storedToken);
-              setHasResetToken(true);
-              setIsCheckingToken(false);
+            if (!isTimestampValid) {
+              setError("Your password reset link has expired. Please request a new one.");
+              setIsCheckingReset(false);
               return;
             }
           }
           
-          // If no token in localStorage, fall back to checking for a session
-          // This is for backward compatibility
+          // First check if we have a session from the magic link
           const { data: sessionData } = await supabase.auth.getSession();
           
           if (sessionData?.session) {
-            console.log('Found valid session for password reset');
-            setHasResetToken(true);
-            setIsCheckingToken(false);
+            console.log("ResetPassword: Valid session found");
+            setIsValidResetRequest(true);
+            setIsCheckingReset(false);
             return;
           }
           
-          // No token or session found
-          console.log('No recovery token or session found');
-          setError('Your reset link has expired or is invalid. Please request a new one.');
-          setIsCheckingToken(false);
+          // If no session but we have a token stored, consider it valid
+          // User will need to verify the token during password update
+          if (isPasswordReset && resetToken) {
+            console.log("ResetPassword: No session but found reset token");
+            setIsValidResetRequest(true);
+            setIsCheckingReset(false);
+            return;
+          }
+          
+          // Nothing found, invalid reset request
+          console.log("ResetPassword: No valid reset session or token found");
+          setError("No active reset request found. Please request a new password reset link.");
+          setIsCheckingReset(false);
         }
       } catch (err) {
-        console.error('Error checking for recovery token:', err);
-        setError('Error verifying your recovery link. Please try again.');
-        setIsCheckingToken(false);
+        console.error("ResetPassword: Error checking reset request:", err);
+        setError("Error checking your reset request. Please try again.");
+        setIsCheckingReset(false);
       }
     };
     
-    checkForRecoveryToken();
+    checkResetRequest();
   }, []);
 
   // Function to handle requesting a new reset link
@@ -122,139 +121,116 @@ export default function ResetPasswordScreen() {
     setLoading(true);
     
     try {
-      console.log('Attempting to update password');
+      console.log("ResetPassword: Attempting to update password");
       
-      // Try using the recovery token if available
-      if (recoveryToken) {
-        console.log('Using recovery token to reset password');
-        
-        try {
-          // Make a direct API call to Supabase Auth API to verify the token
-          // and update the password in one step
-          const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://gihofdmqjwgkotwxdxms.supabase.co';
-          const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
-          const apiUrl = `${supabaseUrl}/auth/v1/verify`;
-          
-          console.log('Making direct API call to verify token and update password');
-          console.log('API URL:', apiUrl);
-          console.log('Using token of length:', recoveryToken ? recoveryToken.length : 0);
-          
-          const response = await fetch(apiUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'apikey': supabaseKey,
-              'Authorization': `Bearer ${supabaseKey}`,
-            },
-            body: JSON.stringify({
-              token: recoveryToken,
-              type: 'recovery',
-              password: password
-            })
-          });
-          
-          const result = await response.json();
-          console.log('API response status:', response.status);
-          
-          if (!response.ok) {
-            console.error('API error:', result);
-            if (response.status === 401) {
-              throw new Error('Recovery token is invalid or expired. Please request a new password reset link.');
-            } else if (response.status === 422) {
-              throw new Error('Password does not meet requirements. It must be at least 6 characters long.');
-            } else {
-              throw new Error(result.error_description || result.error || 'Error updating password');
-            }
-          }
-          
-          console.log('Password updated successfully via direct API');
-          setSuccessMessage('Password has been updated successfully');
-          setPasswordResetComplete(true);
-          
-          // Clean up the token from localStorage
-          if (typeof window !== 'undefined') {
-            localStorage.removeItem('recovery_token');
-          }
-          
-          // Redirect to login after 2 seconds
-          setTimeout(() => {
-            router.replace('/login');
-          }, 2000);
-          
-          return;
-        } catch (apiErr: any) {
-          console.error('Error with direct API call:', apiErr);
-          
-          // Fall back to normal Supabase client approach
-          try {
-            console.log('Falling back to Supabase client API');
-            const { error } = await supabase.auth.updateUser({ 
-              password
-            });
-            
-            if (error) {
-              console.error('Error updating password with client API:', error);
-              throw error;
-            }
-            
-            console.log('Password updated successfully with client API');
-            setSuccessMessage('Password has been updated successfully');
-            setPasswordResetComplete(true);
-            
-            // Redirect to login after 2 seconds
-            setTimeout(() => {
-              supabase.auth.signOut().then(() => {
-                router.replace('/login');
-              });
-            }, 2000);
-            
-            return;
-          } catch (clientErr) {
-            console.error('Client API fallback also failed:', clientErr);
-            throw apiErr; // Throw original error
-          }
-        }
-      }
-      
-      // Fall back to using the session if available
+      // Check if we have a session already
       const { data: sessionData } = await supabase.auth.getSession();
       
       if (sessionData?.session) {
-        console.log('Using session to update password');
-        const { error } = await supabase.auth.updateUser({ password });
+        console.log("ResetPassword: Using existing session to update password");
+        // We have a session already, update password directly
+        const { error } = await supabase.auth.updateUser({
+          password: password
+        });
         
-        if (error) {
-          console.error('Error updating password:', error);
-          throw error;
-        }
+        if (error) throw error;
         
-        console.log('Password updated successfully');
+        console.log("ResetPassword: Password updated successfully");
         setSuccessMessage('Password has been updated successfully');
         setPasswordResetComplete(true);
         
+        // Clean up localStorage
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('passwordResetToken');
+          localStorage.removeItem('passwordResetData');
+          localStorage.removeItem('passwordResetEmail');
+          localStorage.removeItem('passwordResetTimestamp');
+        }
+        
         // Sign out and redirect to login after 2 seconds
         setTimeout(() => {
-          // Sign out to ensure clean state
           supabase.auth.signOut().then(() => {
             router.replace('/login');
           });
         }, 2000);
       } else {
-        console.error('No recovery token or session found for password update');
-        throw new Error('Your reset link has expired. Please request a new one.');
+        // No session, try using stored token
+        console.log("ResetPassword: No session, trying with stored token");
+        
+        if (typeof window !== 'undefined') {
+          const resetToken = localStorage.getItem('passwordResetToken');
+          
+          if (resetToken) {
+            console.log("ResetPassword: Found token in localStorage, using for reset");
+            
+            try {
+              // Make a direct API call to the Supabase Auth API
+              const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+              const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+              
+              if (!supabaseUrl || !supabaseKey) {
+                throw new Error("Missing Supabase configuration");
+              }
+              
+              // This approach depends on having a valid token
+              const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${resetToken}`,
+                  'apikey': supabaseKey
+                },
+                body: JSON.stringify({
+                  password: password
+                })
+              });
+              
+              const result = await response.json();
+              
+              if (!response.ok) {
+                console.error("ResetPassword: API error:", result);
+                throw new Error(result.error_description || result.msg || "Error updating password");
+              }
+              
+              console.log("ResetPassword: Password updated successfully via API");
+              setSuccessMessage('Password has been updated successfully');
+              setPasswordResetComplete(true);
+              
+              // Clean up localStorage
+              localStorage.removeItem('passwordResetToken');
+              localStorage.removeItem('passwordResetData');
+              localStorage.removeItem('passwordResetEmail');
+              localStorage.removeItem('passwordResetTimestamp');
+              
+              // Redirect to login after 2 seconds
+              setTimeout(() => {
+                router.replace('/login');
+              }, 2000);
+            } catch (apiError: any) {
+              console.error("ResetPassword: Direct API error:", apiError);
+              setError(apiError.message || 'Error updating password. Please try again.');
+              setLoading(false);
+            }
+          } else {
+            setError('No valid reset token found. Please request a new reset link.');
+            setLoading(false);
+          }
+        } else {
+          setError('Unable to complete password reset. Please try again.');
+          setLoading(false);
+        }
       }
     } catch (error: any) {
-      console.error('Password update error:', error);
+      console.error("ResetPassword: Error updating password:", error);
       setError(error.message || 'Failed to update password');
-    } finally {
       setLoading(false);
     }
   }
 
-  if (isCheckingToken) {
+  if (isCheckingReset) {
     return (
       <View style={[styles.container, styles.centered]}>
-        <Text>Verifying your reset token...</Text>
+        <Text style={{ color: '#fff' }}>Verifying your reset request...</Text>
       </View>
     );
   }
@@ -263,10 +239,10 @@ export default function ResetPasswordScreen() {
     <View style={styles.container}>
       <Surface style={styles.formContainer} elevation={2}>
         <Text variant="headlineMedium" style={styles.title}>
-          {!hasResetToken ? 'Reset Link Expired' : (passwordResetComplete ? 'Password Updated' : 'Create New Password')}
+          {!isValidResetRequest ? 'Reset Link Expired' : (passwordResetComplete ? 'Password Updated' : 'Create New Password')}
         </Text>
         <Text variant="bodyLarge" style={styles.subtitle}>
-          {!hasResetToken 
+          {!isValidResetRequest 
             ? 'Your reset link has expired or is invalid'
             : (passwordResetComplete 
                 ? 'Your password has been updated successfully' 
@@ -285,8 +261,25 @@ export default function ResetPasswordScreen() {
           </HelperText>
         )}
         
-        {hasResetToken && !passwordResetComplete ? (
+        {isValidResetRequest && !passwordResetComplete ? (
           <>
+            {/* Only show the email field if it's not pre-filled */}
+            {!email && (
+              <TextInput
+                mode="outlined"
+                label="Email"
+                value={email}
+                onChangeText={(text) => {
+                  setEmail(text);
+                  setError(null);
+                }}
+                style={styles.input}
+                keyboardType="email-address"
+                autoCapitalize="none"
+                error={!!error && !email}
+              />
+            )}
+            
             <TextInput
               mode="outlined"
               label="New Password"
@@ -342,6 +335,14 @@ export default function ResetPasswordScreen() {
             Redirecting to login...
           </Text>
         )}
+        
+        <TouchableOpacity 
+          onPress={() => router.push('/login')}
+          style={styles.backButton}
+        >
+          <ArrowLeft size={20} color="#888" />
+          <Text style={styles.backButtonText}>Back to Login</Text>
+        </TouchableOpacity>
       </Surface>
     </View>
   );
@@ -386,8 +387,18 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   redirectingText: {
+    color: '#888',
     textAlign: 'center',
     marginTop: 16,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 24,
+  },
+  backButtonText: {
     color: '#888',
-  }
+    marginLeft: 8,
+  },
 }); 
