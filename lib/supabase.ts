@@ -2,19 +2,30 @@ import 'react-native-url-polyfill/auto';
 import { createClient } from '@supabase/supabase-js';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
-import { Database } from '@/types/supabase';
 import * as constants from '../constants';
 
-// Implement platform-specific storage
+// Implement platform-specific storage adapter
 const ExpoSecureStoreAdapter = {
   getItem: (key: string) => {
+    if (Platform.OS === 'web') {
+      const data = localStorage.getItem(key);
+      return Promise.resolve(data);
+    }
     return SecureStore.getItemAsync(key);
   },
   setItem: (key: string, value: string) => {
-    SecureStore.setItemAsync(key, value);
+    if (Platform.OS === 'web') {
+      localStorage.setItem(key, value);
+      return Promise.resolve();
+    }
+    return SecureStore.setItemAsync(key, value);
   },
   removeItem: (key: string) => {
-    SecureStore.deleteItemAsync(key);
+    if (Platform.OS === 'web') {
+      localStorage.removeItem(key);
+      return Promise.resolve();
+    }
+    return SecureStore.deleteItemAsync(key);
   },
 };
 

@@ -40,7 +40,7 @@ export default function useAuth() {
 
     // Set up auth state change subscriber
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      (event: any, session: any) => {
         console.log('Auth state changed:', event);
         
         // Only handle navigation events if router is ready

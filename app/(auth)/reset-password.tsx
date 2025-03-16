@@ -4,7 +4,6 @@ import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Lock } from 'lucide-react-native';
-import { AuthChangeEvent, Session } from '@supabase/supabase-js';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
@@ -31,7 +30,7 @@ export default function ResetPasswordScreen() {
           
           // Also set up a listener for the PASSWORD_RECOVERY event
           const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            (event: AuthChangeEvent, session: Session | null) => {
+            (event: any, session: any) => {
               if (event === 'PASSWORD_RECOVERY') {
                 // Password recovery event, mark session as valid
                 setHasSession(true);
