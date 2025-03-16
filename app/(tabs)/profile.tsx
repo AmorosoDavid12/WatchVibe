@@ -12,9 +12,21 @@ import { Settings, LogOut, Star } from 'lucide-react-native';
 import { Text, Button, Card, Avatar, ActivityIndicator, Divider, Surface } from 'react-native-paper';
 import { signOut } from '@/lib/supabase';
 
+interface WatchedItem {
+  rating?: number;
+  duration?: number;
+}
+
+interface Profile {
+  id: string;
+  username?: string;
+  avatar_url?: string;
+  email?: string;
+}
+
 export default function ProfileScreen() {
   const router = useRouter();
-  const [profile, setProfile] = useState<any>(null);
+  const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     totalWatched: 0,
@@ -28,37 +40,52 @@ export default function ProfileScreen() {
   }, []);
 
   async function fetchProfile() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', user.id)
-        .single();
-      setProfile(data);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        // Get user data directly from auth session
+        setProfile({
+          id: user.id,
+          email: user.email,
+          username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
+          avatar_url: user.user_metadata?.avatar_url
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching profile:', error);
+    } finally {
       setLoading(false);
     }
   }
 
   async function fetchStats() {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (user) {
-      const { data: watched } = await supabase
-        .from('watched')
-        .select('*')
-        .eq('user_id', user.id);
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: watched, error } = await supabase
+          .from('watched')
+          .select('*')
+          .eq('user_id', user.id);
 
-      if (watched) {
-        const totalWatched = watched.length;
-        const avgRating = watched.reduce((acc, curr) => acc + (curr.rating || 0), 0) / (totalWatched || 1);
-        const watchTime = watched.reduce((acc, curr) => acc + (curr.duration || 0), 0);
+        if (error) {
+          console.error('Error fetching stats:', error);
+          return;
+        }
 
-        setStats({
-          totalWatched,
-          avgRating: Math.round(avgRating * 10) / 10 || 0,
-          watchTime: Math.round(watchTime / 60) || 0, // Convert to hours
-        });
+        if (watched && watched.length > 0) {
+          const totalWatched = watched.length;
+          const avgRating = watched.reduce((acc: number, curr: WatchedItem) => acc + (curr.rating || 0), 0) / (totalWatched || 1);
+          const watchTime = watched.reduce((acc: number, curr: WatchedItem) => acc + (curr.duration || 0), 0);
+
+          setStats({
+            totalWatched,
+            avgRating: Math.round(avgRating * 10) / 10 || 0,
+            watchTime: Math.round(watchTime / 60) || 0, // Convert to hours
+          });
+        }
       }
+    } catch (error) {
+      console.error('Error fetching stats:', error);
     }
   }
 

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { signInWithEmail } from '@/lib/supabase';
-import { Text, TextInput, Button, Surface, ActivityIndicator, HelperText } from 'react-native-paper';
+import { signInWithEmail, signInWithGoogle } from '@/lib/supabase';
+import { Text, TextInput, Button, Surface, ActivityIndicator, HelperText, Divider } from 'react-native-paper';
 import { Mail, Lock, LogIn } from 'lucide-react-native';
 
 export default function LoginScreen() {
@@ -10,6 +10,7 @@ export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [secureTextEntry, setSecureTextEntry] = useState(true);
 
@@ -32,10 +33,17 @@ export default function LoginScreen() {
     }
   }
 
-  // Demo credentials function
-  function fillDemoCredentials() {
-    setEmail('demo@example.com');
-    setPassword('password123');
+  async function handleGoogleSignIn() {
+    setError(null);
+    setGoogleLoading(true);
+    try {
+      const { error } = await signInWithGoogle();
+      if (error) throw error;
+      // Auth will be handled by redirect flow
+    } catch (error: any) {
+      setError(error.message || 'Failed to sign in with Google');
+      setGoogleLoading(false);
+    }
   }
 
   return (
@@ -79,6 +87,10 @@ export default function LoginScreen() {
           right={<TextInput.Icon icon={secureTextEntry ? "eye" : "eye-off"} onPress={() => setSecureTextEntry(!secureTextEntry)} />}
           error={!!error && !password}
         />
+
+        <Link href="/forgot-password" style={styles.forgotPasswordLink}>
+          <Text style={styles.forgotPasswordText}>Forgot Password?</Text>
+        </Link>
         
         <Button 
           mode="contained" 
@@ -86,14 +98,27 @@ export default function LoginScreen() {
           style={styles.button}
           loading={loading}
           icon={() => <LogIn size={20} color="#fff" />}
-          disabled={loading}
+          disabled={loading || googleLoading}
         >
           Sign In
         </Button>
 
-        <TouchableOpacity onPress={fillDemoCredentials}>
-          <Text style={styles.demoText}>Use demo account</Text>
-        </TouchableOpacity>
+        <View style={styles.dividerContainer}>
+          <Divider style={styles.divider} />
+          <Text style={styles.dividerText}>OR</Text>
+          <Divider style={styles.divider} />
+        </View>
+
+        <Button 
+          mode="outlined" 
+          onPress={handleGoogleSignIn}
+          style={styles.googleButton}
+          loading={googleLoading}
+          icon="google"
+          disabled={loading || googleLoading}
+        >
+          Sign in with Google
+        </Button>
 
         <Link href="/register" style={styles.link}>
           <Text style={styles.linkText}>Don't have an account? Sign up</Text>
@@ -130,22 +155,42 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     backgroundColor: '#2a2a2a',
   },
+  forgotPasswordLink: {
+    alignSelf: 'flex-end',
+    marginBottom: 16,
+  },
+  forgotPasswordText: {
+    color: '#e21f70',
+    fontSize: 14,
+  },
   button: {
     marginTop: 8,
     paddingVertical: 6,
   },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 20,
+  },
+  divider: {
+    flex: 1,
+    backgroundColor: '#444',
+  },
+  dividerText: {
+    color: '#888',
+    paddingHorizontal: 16,
+    fontSize: 14,
+  },
+  googleButton: {
+    marginBottom: 16,
+    borderColor: '#444',
+  },
   link: {
     alignSelf: 'center',
-    marginTop: 24,
+    marginTop: 8,
   },
   linkText: {
     color: '#888',
     fontSize: 14,
-  },
-  demoText: {
-    color: '#e21f70',
-    textAlign: 'center',
-    fontSize: 14,
-    marginTop: 16,
   },
 });

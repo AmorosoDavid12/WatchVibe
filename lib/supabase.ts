@@ -54,6 +54,40 @@ export async function signUpWithEmail(email: string, password: string) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
+    options: {
+      emailRedirectTo: process.env.EXPO_PUBLIC_APP_URL || 'http://localhost:8081',
+      data: {
+        username: email.split('@')[0],
+      }
+    }
+  });
+  return { data, error };
+}
+
+export async function signInWithGoogle() {
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
+    options: {
+      redirectTo: process.env.EXPO_PUBLIC_APP_URL || 'http://localhost:8081',
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      },
+    },
+  });
+  return { data, error };
+}
+
+export async function resetPassword(email: string) {
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: process.env.EXPO_PUBLIC_APP_URL ? `${process.env.EXPO_PUBLIC_APP_URL}/reset-password` : 'http://localhost:8081/reset-password',
+  });
+  return { data, error };
+}
+
+export async function updatePassword(password: string) {
+  const { data, error } = await supabase.auth.updateUser({
+    password,
   });
   return { data, error };
 }
