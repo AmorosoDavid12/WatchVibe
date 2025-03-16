@@ -46,6 +46,7 @@
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@types/react": "~18.3.12",
+    "supabase": "^2.19.7",
     "typescript": "^5.3.3"
   }
 }

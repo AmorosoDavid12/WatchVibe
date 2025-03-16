@@ -1,76 +1,91 @@
 import React, { useEffect, useState } from 'react';
-import { View, StyleSheet } from 'react-native';
-import { Text, ActivityIndicator } from 'react-native-paper';
-import { useRouter, useLocalSearchParams } from 'expo-router';
+import { View, Text, ActivityIndicator, StyleSheet } from 'react-native';
+import { useRouter, usePathname, useSegments } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import * as WebBrowser from 'expo-web-browser';
 
 export default function AuthCallbackPage() {
   const router = useRouter();
-  const params = useLocalSearchParams();
   const [error, setError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(true);
 
   useEffect(() => {
-    const handleCallback = async () => {
+    // This component handles auth callbacks including password reset
+    async function handleCallback() {
       try {
-        // Check if we're handling a password reset
-        const isReset = params.reset === 'true';
-        const hash = window.location.hash;
+        setProcessing(true);
         
-        if (isReset) {
-          // For password reset, we need to extract token
-          if (hash && hash.includes('access_token')) {
-            // Process the hash but don't redirect yet - this stores the session
-            const { data, error } = await supabase.auth.getSession();
-            
-            if (error) {
-              console.error('Session error:', error.message);
-              setError('Failed to establish session. Please try again.');
-            } else if (data.session) {
-              // Success! Now redirect to the reset password form
-              router.replace('/reset-password');
-            } else {
-              setError('No session data found. Please request a new reset link.');
-            }
-          } else if (hash && hash.includes('error')) {
-            // There was an error in the hash
-            const hashParams = new URLSearchParams(hash.substring(1));
-            const errorCode = hashParams.get('error_code');
-            const errorDesc = hashParams.get('error_description');
-            
-            setError(`Authentication error: ${errorDesc || errorCode || 'Unknown error'}`);
-            
-            // Still redirect to reset password page which will show the expired token UI
-            setTimeout(() => {
-              router.replace('/reset-password');
-            }, 1500);
-          } else {
-            // No token found but we're in callback
-            setError('No authentication token found. Please try again.');
+        // Get the full URL including hash
+        const url = window.location.href;
+        
+        // Parse hash parameters
+        const hashParams = url.includes('#') ? 
+          Object.fromEntries(
+            url
+              .split('#')[1]
+              .split('&')
+              .map(pair => pair.split('='))
+          ) : {};
+        
+        // Handle different auth flows
+        if (hashParams.type === 'recovery') {
+          // Check for access_token which is needed for password reset
+          if (!hashParams.access_token) {
+            throw new Error('Password reset token not found in URL');
           }
+          
+          // Set the session server-side with the access token
+          const { data, error: sessionError } = await supabase.auth.setSession({
+            access_token: hashParams.access_token,
+            refresh_token: hashParams.refresh_token || '',
+          });
+          
+          if (sessionError) {
+            console.error('Error setting session:', sessionError);
+            throw sessionError;
+          }
+          
+          // Check if we now have a valid session
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (!sessionData.session) {
+            throw new Error('Failed to create a valid session');
+          }
+          
+          // If everything is successful, redirect to reset password page
+          router.replace('/reset-password');
         } else {
-          // Not a password reset flow, just process the session
-          await supabase.auth.getSession();
-          router.replace('/(tabs)');
+          // For other auth flows
+          router.replace('/login');
         }
       } catch (err: any) {
-        console.error('Auth callback error:', err);
-        setError(err.message || 'An unexpected error occurred');
+        console.error('Error in auth callback:', err);
+        setError(err.message || 'An error occurred during authentication');
+        setProcessing(false);
       }
-    };
+    }
 
     handleCallback();
-  }, [params, router]);
+  }, [router]);
+
+  if (error) {
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>Authentication Error</Text>
+        <Text style={styles.error}>{error}</Text>
+        <Text 
+          style={styles.link}
+          onPress={() => router.replace('/login')}
+        >
+          Return to Login
+        </Text>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
-      {error ? (
-        <Text style={styles.errorText}>{error}</Text>
-      ) : (
-        <>
-          <ActivityIndicator size="large" color="#e21f70" />
-          <Text style={styles.loadingText}>Processing authentication...</Text>
-        </>
-      )}
+      <ActivityIndicator size="large" color="#0000ff" />
+      <Text style={styles.text}>Processing authentication...</Text>
     </View>
   );
 }
@@ -78,19 +93,27 @@ export default function AuthCallbackPage() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
-    alignItems: 'center',
     justifyContent: 'center',
-    padding: 16,
+    alignItems: 'center',
+    padding: 20,
   },
-  loadingText: {
-    marginTop: 16,
+  text: {
+    marginTop: 20,
     fontSize: 16,
-    color: '#fff',
   },
-  errorText: {
-    color: '#ff5252',
+  title: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+  },
+  error: {
+    color: 'red',
+    marginBottom: 20,
     textAlign: 'center',
-    fontSize: 16,
   },
+  link: {
+    color: 'blue',
+    textDecorationLine: 'underline',
+    marginTop: 20,
+  }
 }); 

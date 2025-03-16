@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
-import { useRouter, useSegments } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Lock } from 'lucide-react-native';
+import { AuthChangeEvent, Session } from '@supabase/supabase-js';
 
 export default function ResetPasswordScreen() {
   const router = useRouter();
@@ -17,15 +18,30 @@ export default function ResetPasswordScreen() {
   const [hasSession, setHasSession] = useState(false);
   const [isCheckingSession, setIsCheckingSession] = useState(true);
 
-  // Check if we have a valid session
+  // Check for password recovery event and session
   useEffect(() => {
-    const checkSession = async () => {
+    const checkSessionAndEvent = async () => {
       try {
-        // Check if we have an active session from our auth callback
-        const { data } = await supabase.auth.getSession();
+        // Check if we have an active recovery session
+        const { data: authData } = await supabase.auth.getSession();
         
-        if (data?.session) {
+        if (authData?.session) {
+          // We have a session, proceed with password reset
           setHasSession(true);
+          
+          // Also set up a listener for the PASSWORD_RECOVERY event
+          const { data: { subscription } } = supabase.auth.onAuthStateChange(
+            (event: AuthChangeEvent, session: Session | null) => {
+              if (event === 'PASSWORD_RECOVERY') {
+                // Password recovery event, mark session as valid
+                setHasSession(true);
+              }
+            }
+          );
+          
+          return () => {
+            subscription.unsubscribe();
+          };
         } else {
           // No session, show error
           setError('No active session found. Please use a reset link from your email.');
@@ -38,7 +54,7 @@ export default function ResetPasswordScreen() {
       }
     };
 
-    checkSession();
+    checkSessionAndEvent();
   }, []);
 
   // Function to handle requesting a new reset link
@@ -67,16 +83,7 @@ export default function ResetPasswordScreen() {
     setLoading(true);
     
     try {
-      // First verify we have a valid session
-      const { data: sessionData } = await supabase.auth.getSession();
-      
-      if (!sessionData.session) {
-        setError('No active session found. Please use a new reset link from your email.');
-        setLoading(false);
-        return;
-      }
-      
-      // Supabase updateUser will use the current session
+      // Update the password directly
       const { error } = await supabase.auth.updateUser({
         password: password
       });
