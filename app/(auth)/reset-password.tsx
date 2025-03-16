@@ -26,10 +26,17 @@ export default function ResetPasswordScreen() {
       try {
         console.log("ResetPassword: Checking for valid reset request");
         
+        // Check URL parameters first - use both useLocalSearchParams and window.location
+        // This handles both React Native and web platforms
+        const passwordResetParam = params.passwordReset === 'true';
+        let isPasswordReset = passwordResetParam;
+        
         if (typeof window !== 'undefined') {
-          // Check URL parameters first
+          // Double-check URL parameters with window.location for web
           const urlParams = new URLSearchParams(window.location.search);
-          const isPasswordReset = urlParams.get('passwordReset') === 'true';
+          const urlPasswordReset = urlParams.get('passwordReset') === 'true';
+          isPasswordReset = isPasswordReset || urlPasswordReset;
+          
           console.log("ResetPassword: passwordReset param:", isPasswordReset);
           
           // Check localStorage for token and other data
@@ -71,10 +78,38 @@ export default function ResetPasswordScreen() {
             return;
           }
           
-          // If no session but we have a token stored, consider it valid
-          // User will need to verify the token during password update
+          // If we have a token stored but no session, try to verify it
+          if (resetToken) {
+            try {
+              console.log("ResetPassword: Attempting to verify token");
+              
+              // Try to verify using the session without waiting for response
+              await supabase.auth.verifyOtp({
+                token_hash: resetToken,
+                type: 'recovery'
+              });
+              
+              console.log("ResetPassword: Token verification successful or in progress");
+              setIsValidResetRequest(true);
+              setIsCheckingReset(false);
+              return;
+            } catch (verifyError) {
+              console.error("ResetPassword: Token verification error:", verifyError);
+              // Continue to the next check even if verification fails
+            }
+          }
+          
+          // If no verification success but we have a token and URL param, still consider valid
           if (isPasswordReset && resetToken) {
-            console.log("ResetPassword: No session but found reset token");
+            console.log("ResetPassword: URL indicates reset flow with token present");
+            setIsValidResetRequest(true);
+            setIsCheckingReset(false);
+            return;
+          }
+          
+          // If we have a token in localStorage but no param, still consider it valid
+          if (resetToken) {
+            console.log("ResetPassword: Found token in localStorage, considering valid");
             setIsValidResetRequest(true);
             setIsCheckingReset(false);
             return;
@@ -83,6 +118,15 @@ export default function ResetPasswordScreen() {
           // Nothing found, invalid reset request
           console.log("ResetPassword: No valid reset session or token found");
           setError("No active reset request found. Please request a new password reset link.");
+          setIsCheckingReset(false);
+        } else {
+          // React Native path (not web)
+          if (isPasswordReset) {
+            console.log("ResetPassword: Native platform with passwordReset param");
+            setIsValidResetRequest(true);
+          } else {
+            setError("No active reset request found. Please request a new password reset link.");
+          }
           setIsCheckingReset(false);
         }
       } catch (err) {
@@ -93,7 +137,7 @@ export default function ResetPasswordScreen() {
     };
     
     checkResetRequest();
-  }, []);
+  }, [params]);
 
   // Function to handle requesting a new reset link
   const handleRequestNewLink = () => {
@@ -351,54 +395,55 @@ export default function ResetPasswordScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
     padding: 16,
-    justifyContent: 'center',
+    backgroundColor: '#121212',
   },
   centered: {
+    justifyContent: 'center',
     alignItems: 'center',
   },
   formContainer: {
-    padding: 24,
-    borderRadius: 12,
-    backgroundColor: '#1a1a1a',
+    padding: 20,
+    borderRadius: 8,
+    maxWidth: 500,
+    width: '100%',
+    alignSelf: 'center',
+    marginTop: 40,
   },
   title: {
-    fontWeight: 'bold',
-    color: '#fff',
+    fontSize: 24,
+    marginBottom: 8,
     textAlign: 'center',
   },
   subtitle: {
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 8,
     marginBottom: 24,
+    textAlign: 'center',
+    opacity: 0.7,
   },
   input: {
     marginBottom: 16,
-    backgroundColor: '#2a2a2a',
   },
   button: {
     marginTop: 8,
-    paddingVertical: 6,
-  },
-  successMessage: {
-    color: '#4CAF50',
-    marginBottom: 16,
-  },
-  redirectingText: {
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 16,
+    paddingVertical: 8,
   },
   backButton: {
+    marginTop: 24,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 24,
   },
   backButtonText: {
-    color: '#888',
     marginLeft: 8,
+    color: '#888',
+  },
+  successMessage: {
+    color: 'green',
+    marginBottom: 16,
+  },
+  redirectingText: {
+    textAlign: 'center',
+    marginTop: 16,
+    opacity: 0.7,
   },
 }); 
