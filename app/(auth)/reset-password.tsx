@@ -20,44 +20,69 @@ export default function ResetPasswordScreen() {
 
   // Check for password recovery event and session
   useEffect(() => {
+    let isMounted = true;
+    
     const checkSessionAndEvent = async () => {
       try {
         // Check if we have an active recovery session
         const { data: authData } = await supabase.auth.getSession();
         console.log('Reset password page - Session check:', authData?.session ? 'Has session' : 'No session');
         
-        if (authData?.session) {
-          // We have a session, proceed with password reset
-          setHasSession(true);
-          
-          // Also set up a listener for the PASSWORD_RECOVERY event
-          const { data: { subscription } } = supabase.auth.onAuthStateChange(
-            (event: any, session: any) => {
-              console.log('Auth event in reset password:', event);
-              if (event === 'PASSWORD_RECOVERY') {
-                // Password recovery event, mark session as valid
-                console.log('PASSWORD_RECOVERY event detected');
+        if (isMounted) {
+          if (authData?.session) {
+            // We have a session, proceed with password reset
+            setHasSession(true);
+          } else {
+            // No session yet, try waiting a moment for session to be established
+            // This helps when coming directly from the auth callback
+            setTimeout(async () => {
+              if (!isMounted) return;
+              
+              const { data: retryData } = await supabase.auth.getSession();
+              console.log('Retry session check:', retryData?.session ? 'Has session' : 'Still no session');
+              
+              if (retryData?.session) {
                 setHasSession(true);
+              } else {
+                // No session, show error and provide option to request new link
+                setError('No active session found. Please use a reset link from your email or request a new one.');
               }
-            }
-          );
-          
-          return () => {
-            subscription.unsubscribe();
-          };
-        } else {
-          // No session, show error and provide option to request new link
-          setError('No active session found. Please use a reset link from your email or request a new one.');
+              setIsCheckingSession(false);
+            }, 1000);
+            return;
+          }
         }
       } catch (err) {
         console.error('Error checking session:', err);
-        setError('Error verifying your session. Please try again.');
+        if (isMounted) {
+          setError('Error verifying your session. Please try again.');
+        }
       } finally {
-        setIsCheckingSession(false);
+        if (isMounted) {
+          setIsCheckingSession(false);
+        }
       }
     };
 
+    // Also set up a listener for the PASSWORD_RECOVERY event
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event: any, session: any) => {
+        console.log('Auth event in reset password:', event);
+        if (event === 'PASSWORD_RECOVERY') {
+          // Password recovery event, mark session as valid
+          console.log('PASSWORD_RECOVERY event detected with session:', !!session);
+          setHasSession(true);
+          setIsCheckingSession(false);
+        }
+      }
+    );
+    
     checkSessionAndEvent();
+    
+    return () => {
+      isMounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Function to handle requesting a new reset link

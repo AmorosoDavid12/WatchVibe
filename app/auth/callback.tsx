@@ -16,24 +16,51 @@ export default function AuthCallbackPage() {
         setProcessing(true);
         console.log('Auth callback - URL params:', params);
         
-        // Get the full URL including query params
+        // Get the full URL including hash
         const url = window.location.href;
         console.log('Full URL:', url);
         
+        // Parse hash parameters
+        const hashParams = url.includes('#') ? 
+          Object.fromEntries(
+            url
+              .split('#')[1]
+              .split('&')
+              .map(pair => pair.split('='))
+          ) : {};
+        
+        console.log('Hash params:', hashParams);
+        
         // Check if this is a recovery (password reset) flow
-        const isRecovery = params.type === 'recovery' || url.includes('type=recovery');
+        const isRecovery = params.type === 'recovery' || 
+                          url.includes('type=recovery') || 
+                          hashParams.type === 'recovery';
+                          
+        // Try to get token from URL params first, then from hash fragment
         const urlParams = new URLSearchParams(window.location.search);
-        const token = params.token || urlParams.get('token');
+        const token = params.token || 
+                     urlParams.get('token') || 
+                     hashParams.access_token;
         
         if (isRecovery) {
-          console.log('Detected password recovery flow');
+          console.log('Detected password recovery flow, token present:', !!token);
           
           if (!token) {
             throw new Error('Password reset token not found in URL');
           }
           
+          // For password recovery with hash fragment, set the session using the hash data
+          if (hashParams.access_token) {
+            console.log('Setting session with hash access token');
+            await supabase.auth.setSession({
+              access_token: hashParams.access_token,
+              refresh_token: hashParams.refresh_token || '',
+            });
+          }
+          
           // Check if we have a valid session from the auth redirect
           const { data: sessionData } = await supabase.auth.getSession();
+          console.log('Session check result:', sessionData?.session ? 'Valid session' : 'No session');
           
           if (sessionData?.session) {
             console.log('Valid session detected for password reset');
@@ -53,8 +80,15 @@ export default function AuthCallbackPage() {
                 console.error('Error verifying token:', verifyError);
               }
               
-              // Redirect to reset password page even if there was an error
-              // The reset page will handle checking for a valid session
+              // Try to set the session using the token from hash if available
+              if (hashParams.access_token) {
+                await supabase.auth.setSession({
+                  access_token: hashParams.access_token,
+                  refresh_token: hashParams.refresh_token || '',
+                });
+              }
+              
+              // Redirect to reset password page
               router.replace('/reset-password');
             } catch (err) {
               console.error('Error with token verification:', err);
@@ -63,15 +97,7 @@ export default function AuthCallbackPage() {
             }
           }
         } else {
-          // Handle hash fragment for other auth types (like OAuth)
-          const hashParams = url.includes('#') ? 
-            Object.fromEntries(
-              url
-                .split('#')[1]
-                .split('&')
-                .map(pair => pair.split('='))
-            ) : {};
-            
+          // Handle other auth types (like OAuth)
           // If we have an access token in the hash, try to set the session
           if (hashParams.access_token) {
             await supabase.auth.setSession({
