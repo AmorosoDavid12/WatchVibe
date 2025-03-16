@@ -59,39 +59,29 @@ export default function AuthCallbackPage() {
         if (isRecovery) {
           console.log('Handling password recovery flow');
           
-          // For password reset, we need to immediately sign the user out
-          // This prevents the automatic login behavior from Supabase
+          // For password reset, we will preserve the session that Supabase creates
+          // but redirect to the reset password page
           if ((type === 'recovery' && token) || preventAutoLogin) {
-            console.log('Detected recovery flow, signing out first');
+            console.log('Detected recovery flow, checking session');
             
             try {
-              // Get the token from the URL, and make sure we have it for the redirect
-              const tokenToPass = token || 
-                urlSearchParams.get('token') ||
-                (hashParams.token || hashParams.access_token || '');
-              
-              console.log('Token to pass to reset page:', !!tokenToPass);
-              
-              // Get session info first to verify it was a valid token
+              // Get session info to verify the token was valid
               const { data: sessionData } = await supabase.auth.getSession();
-              const hadSession = !!sessionData?.session;
-              console.log('Session present before signout:', hadSession);
+              const hasSession = !!sessionData?.session;
+              console.log('Session present after recovery flow:', hasSession);
               
-              // Sign out to clear the session Supabase automatically created
-              await supabase.auth.signOut();
-              console.log('Successfully signed out user');
-              
-              // Always include the token in the redirect to reset password
-              if (tokenToPass) {
-                console.log('Redirecting with token to reset password page');
-                router.replace(`/reset-password?recovery_verified=true&token=${encodeURIComponent(tokenToPass)}&type=recovery`);
-              } else {
-                console.log('No token available for redirect, using recovery_verified only');
+              if (hasSession) {
+                // We have a valid session, redirect to reset-password
+                console.log('Valid session established, redirecting to reset-password');
                 router.replace('/reset-password?recovery_verified=true');
+              } else {
+                // No session, the token might be invalid
+                console.error('No session established, token may be invalid');
+                router.replace('/reset-password?error=invalid_token');
               }
               return;
-            } catch (signOutErr) {
-              console.error('Error signing out:', signOutErr);
+            } catch (err) {
+              console.error('Error checking session:', err);
               // Still try to redirect to reset password
               router.replace('/reset-password');
               return;
