@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-import { resetPassword } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Mail, ArrowLeft } from 'lucide-react-native';
 
@@ -22,7 +22,19 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
 
     try {
-      const { error } = await resetPassword(email);
+      // Get current URL origin for redirect
+      let redirectUrl;
+      if (typeof window !== 'undefined') {
+        // In web environment
+        const origin = window.location.origin;
+        redirectUrl = `${origin}/reset-password`;
+      }
+
+      // Send password reset email
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: redirectUrl
+      });
+      
       if (error) throw error;
       
       setEmailSent(true);
@@ -64,7 +76,6 @@ export default function ForgotPasswordScreen() {
               keyboardType="email-address"
               autoCapitalize="none"
               left={<TextInput.Icon icon={() => <Mail size={20} color="#888" />} />}
-              error={!!error && !email}
             />
 
             <Button 
@@ -74,13 +85,13 @@ export default function ForgotPasswordScreen() {
               loading={loading}
               disabled={loading}
             >
-              Send Magic Link
+              Send Reset Link
             </Button>
           </>
         ) : (
           <>
             <Text variant="bodyLarge" style={styles.successMessage}>
-              We've sent a magic link to <Text style={styles.emailText}>{email}</Text>.
+              We've sent a reset link to <Text style={styles.emailText}>{email}</Text>
             </Text>
             <Text style={styles.instructions}>
               Please check your email and click on the link to set a new password.
@@ -111,6 +122,9 @@ const styles = StyleSheet.create({
     padding: 24,
     borderRadius: 12,
     backgroundColor: '#1a1a1a',
+    maxWidth: 500,
+    width: '100%',
+    alignSelf: 'center',
   },
   title: {
     fontWeight: 'bold',
