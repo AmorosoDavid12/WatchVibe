@@ -202,41 +202,71 @@ export default function ResetPasswordScreen() {
         console.log("ResetPassword: No session, trying with stored token");
         
         if (typeof window !== 'undefined') {
-          const resetToken = localStorage.getItem('passwordResetToken');
+          // Get token data from localStorage
+          const accessToken = localStorage.getItem('passwordResetToken');
+          const resetData = localStorage.getItem('passwordResetData');
           
-          if (resetToken) {
+          if (accessToken) {
             console.log("ResetPassword: Found token in localStorage, using for reset");
             
             try {
-              // Make a direct API call to the Supabase Auth API
-              const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-              const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+              // First try setting the session with the access token
+              console.log("ResetPassword: Attempting to set session with token");
+              let refreshToken = null;
               
-              if (!supabaseUrl || !supabaseKey) {
-                throw new Error("Missing Supabase configuration");
+              // Try to extract refresh token from stored data if available
+              if (resetData) {
+                try {
+                  const parsedData = JSON.parse(resetData);
+                  if (parsedData.refresh_token) {
+                    refreshToken = parsedData.refresh_token;
+                  }
+                } catch (e) {
+                  console.error("ResetPassword: Error parsing reset data", e);
+                }
               }
               
-              // This approach depends on having a valid token
-              const response = await fetch(`${supabaseUrl}/auth/v1/user`, {
-                method: 'PUT',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${resetToken}`,
-                  'apikey': supabaseKey
-                },
-                body: JSON.stringify({
+              // Try to use the session to update the password
+              if (accessToken && refreshToken) {
+                // Set the session first
+                const { error: sessionError } = await supabase.auth.setSession({
+                  access_token: accessToken,
+                  refresh_token: refreshToken
+                });
+                
+                if (sessionError) {
+                  console.error("ResetPassword: Error setting session", sessionError);
+                  throw new Error("Unable to establish session: " + sessionError.message);
+                }
+                
+                // Then update password with the established session
+                const { error: updateError } = await supabase.auth.updateUser({
                   password: password
-                })
-              });
-              
-              const result = await response.json();
-              
-              if (!response.ok) {
-                console.error("ResetPassword: API error:", result);
-                throw new Error(result.error_description || result.msg || "Error updating password");
+                });
+                
+                if (updateError) throw updateError;
+                
+                console.log("ResetPassword: Password updated successfully via session");
+              } else {
+                // If we don't have a refresh token, try a different approach with the SDK
+                // Use the password recovery method directly
+                console.log("ResetPassword: Using recovery method with token");
+                
+                if (!email) {
+                  throw new Error("Email is required for password reset");
+                }
+                
+                // This needs to match the way the token was originally created
+                // Try to recover using email + new password
+                const { error: recoveryError } = await supabase.auth.updateUser({
+                  password: password,
+                  email: email
+                });
+                
+                if (recoveryError) throw recoveryError;
               }
               
-              console.log("ResetPassword: Password updated successfully via API");
+              console.log("ResetPassword: Password updated successfully");
               setSuccessMessage('Password has been updated successfully');
               setPasswordResetComplete(true);
               
@@ -251,7 +281,7 @@ export default function ResetPasswordScreen() {
                 router.replace('/login');
               }, 2000);
             } catch (apiError: any) {
-              console.error("ResetPassword: Direct API error:", apiError);
+              console.error("ResetPassword: API error:", apiError);
               setError(apiError.message || 'Error updating password. Please try again.');
               setLoading(false);
             }
