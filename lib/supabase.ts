@@ -89,9 +89,10 @@ export async function resetPassword(email: string) {
     console.log("Reset password for email:", email);
     
     // Build the redirect URL to go directly to the reset password page
+    // Include parameters to prevent auto-login
     const redirectUrl = typeof window !== 'undefined' 
-      ? `${window.location.origin}/reset-password`  // Direct to reset-password page
-      : 'http://localhost:8081/reset-password';     // Fallback for React Native
+      ? `${window.location.origin}/reset-password?passwordReset=true&preventAutoLogin=true`
+      : 'http://localhost:8081/reset-password?passwordReset=true&preventAutoLogin=true';
     
     console.log("Using redirect URL:", redirectUrl);
     

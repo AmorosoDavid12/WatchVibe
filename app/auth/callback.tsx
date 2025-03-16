@@ -40,6 +40,9 @@ export default function AuthCallbackPage() {
       const url = window.location.href;
       const urlSearchParams = new URLSearchParams(window.location.search);
       
+      // Check if this is a direct verification link from Supabase
+      const isDirectVerifyLink = url.includes('/auth/v1/verify') || url.includes('gihofdmqjwgkotwxdxms.supabase.co/auth/v1/verify');
+      
       // Extract token directly from the full URL if present
       let directToken = null;
       if (url.includes('token=')) {
@@ -65,10 +68,7 @@ export default function AuthCallbackPage() {
         try {
           // Try to parse as standard URL params
           hashParams = Object.fromEntries(
-            cleanHash.split('&').map(pair => {
-              const [key, value] = pair.split('=');
-              return [key, decodeURIComponent(value || '')];
-            })
+            new URLSearchParams(cleanHash).entries()
           );
           
           console.log("AuthCallback: Found hash params:", Object.keys(hashParams));
@@ -78,9 +78,11 @@ export default function AuthCallbackPage() {
       }
       
       // Check if URL contains reset=true or type=recovery for password reset
+      // Also check for direct verification links from Supabase with type=recovery
       const isReset = urlSearchParams.get('reset') === 'true' || 
                       hashParams.type === 'recovery' ||
-                      url.includes('type=recovery');
+                      urlSearchParams.get('type') === 'recovery' ||
+                      (isDirectVerifyLink && url.includes('type=recovery'));
       
       // Handle password reset redirect first - highest priority
       if (isReset) {
@@ -96,19 +98,41 @@ export default function AuthCallbackPage() {
             localStorage.setItem('passwordResetToken', token);
             localStorage.setItem('passwordResetTimestamp', Date.now().toString());
             
+            // Store hash tokens as well if present
+            if (hashParams.access_token && hashParams.refresh_token) {
+              localStorage.setItem('passwordResetAccessToken', hashParams.access_token);
+              localStorage.setItem('passwordResetRefreshToken', hashParams.refresh_token);
+            }
+            
             // Also store any email if available
             const email = urlSearchParams.get('email') || hashParams.email;
             if (email) {
               localStorage.setItem('passwordResetEmail', email);
             }
             
-            // Store complete token data
-            const tokenData = {
-              token: token,
-              type: 'recovery',
-              timestamp: Date.now()
-            };
-            localStorage.setItem('passwordResetData', JSON.stringify(tokenData));
+            // If this is a direct verification link, DO NOT set a session
+            // We'll just store the tokens and redirect to the reset-password page
+            if (isDirectVerifyLink) {
+              console.log("AuthCallback: Direct verification link detected, preventing auto-login");
+              
+              // Here we're ensuring we don't set up a session for direct verification links
+              // Store the URL to redirect to reset-password
+              localStorage.setItem('passwordResetSource', 'directVerify');
+              
+              // Redirect to reset-password without setting up a session
+              setTimeout(() => {
+                router.replace('/reset-password?passwordReset=true&directVerify=true');
+              }, 100);
+              return;
+            } else {
+              // Store complete token data for non-direct links
+              const tokenData = {
+                token: token,
+                type: 'recovery',
+                timestamp: Date.now()
+              };
+              localStorage.setItem('passwordResetData', JSON.stringify(tokenData));
+            }
           }
         }
         
