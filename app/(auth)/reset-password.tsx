@@ -5,6 +5,21 @@ import { supabase } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Lock, ArrowLeft } from 'lucide-react-native';
 
+/**
+ * Reset Password Screen Component
+ * 
+ * IMPORTANT: This component handles the password reset functionality.
+ * DO NOT modify the URL parameter handling and token processing logic
+ * without thorough testing of the entire reset password flow.
+ * 
+ * The flow works as follows:
+ * 1. User clicks reset link from email
+ * 2. Link redirects to app with access tokens in URL hash or query params
+ * 3. Component extracts tokens and establishes a Supabase session
+ * 4. User sets a new password which is sent to Supabase to update
+ * 
+ * Any changes to this component can break the password reset functionality!
+ */
 export default function ResetPasswordScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -19,7 +34,15 @@ export default function ResetPasswordScreen() {
   const [hasValidSession, setHasValidSession] = useState(false);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   
-  // First useEffect - Handle URL hash and establish session when component mounts
+  /**
+   * CRITICAL AUTHENTICATION LOGIC
+   * 
+   * This effect handles the processing of password reset tokens either from URL hash fragments
+   * or query parameters. It establishes a valid session with Supabase using the tokens.
+   * 
+   * WARNING: Do not modify this logic unless you fully understand Supabase's authentication flow.
+   * Password reset will break if this token handling is changed incorrectly.
+   */
   useEffect(() => {
     async function processAuthState() {
       try {
@@ -30,104 +53,104 @@ export default function ResetPasswordScreen() {
         }
         
         console.log("Processing auth state for password reset");
+        console.log("URL:", window.location.href);
         
-        // Check URL search params first (new approach)
-        const urlParams = new URLSearchParams(window.location.search);
-        const isPasswordReset = urlParams.get('type') === 'recovery';
-        
-        if (isPasswordReset) {
-          console.log("Detected recovery in URL params");
-          
-          // We need to wait for Supabase to process the token and establish a session
-          const { data } = await supabase.auth.getSession();
-          
-          if (data?.session) {
-            console.log("Valid session established from recovery token");
-            setHasValidSession(true);
-            setUserEmail(data.session.user.email || null);
-            setIsValidatingSession(false);
-            return;
-          }
-        }
-        
-        // Check localStorage (set by callback.tsx)
-        if (localStorage.getItem('hasValidSession') === 'true') {
-          const email = localStorage.getItem('passwordResetEmail');
-          const timestamp = localStorage.getItem('passwordResetTimestamp');
-          
-          // Check if the reset link is still valid (1 hour)
-          if (timestamp && (Date.now() - parseInt(timestamp)) < 3600000) {
-            console.log("Found valid session data in localStorage", email);
-            setHasValidSession(true);
-            setUserEmail(email || null);
-            setIsValidatingSession(false);
-            return;
-          } else {
-            // Clear expired data
-            localStorage.removeItem('hasValidSession');
-            localStorage.removeItem('passwordResetEmail');
-            localStorage.removeItem('passwordResetTimestamp');
-          }
-        }
-        
-        // Get hash fragment (without the # character)
+        // Check URL hash fragment first
         const hash = window.location.hash.substring(1);
         
         if (hash) {
-          // Parse hash params
-          const params = new URLSearchParams(hash);
-          const accessToken = params.get('access_token');
-          const refreshToken = params.get('refresh_token');
-          const type = params.get('type');
+          console.log("Found hash fragment in URL");
           
-          console.log("Hash params type:", type);
+          // Parse hash parameters
+          const hashParams: Record<string, string> = {};
+          const hashParts = hash.split('&');
           
-          // If we have recovery tokens, set the session
-          if (accessToken && type === 'recovery') {
-            console.log("Found recovery tokens, setting session");
-            
-            // Set the session with the tokens
-            const { data, error: sessionError } = await supabase.auth.setSession({
-              access_token: accessToken,
-              refresh_token: refreshToken || '',
-            });
-            
-            if (sessionError) {
-              console.error("Error setting session:", sessionError);
-              throw sessionError;
+          for (const part of hashParts) {
+            const [key, value] = part.split('=');
+            if (key && value) {
+              hashParams[key] = decodeURIComponent(value);
             }
+          }
+          
+          console.log("Parsed hash params:", hashParams);
+          
+          // Extract tokens and type
+          const accessToken = hashParams['access_token'];
+          const refreshToken = hashParams['refresh_token'];
+          const type = hashParams['type'];
+          
+          // Check for recovery type in hash - CRITICAL for password reset flow
+          if (accessToken && (type === 'recovery' || hash.includes('type=recovery'))) {
+            console.log("Found recovery tokens in hash, setting session");
             
-            if (data?.session) {
-              console.log("Successfully established session from hash");
-              setHasValidSession(true);
-              setUserEmail(data.session.user.email || null);
+            try {
+              // Set the session with the tokens - this establishes auth with Supabase
+              const { data, error: sessionError } = await supabase.auth.setSession({
+                access_token: accessToken,
+                refresh_token: refreshToken || '',
+              });
               
-              // Store in localStorage for redundancy
-              localStorage.setItem('hasValidSession', 'true');
-              localStorage.setItem('passwordResetEmail', data.session.user.email || '');
-              localStorage.setItem('passwordResetTimestamp', Date.now().toString());
-              
-              // Clean the URL by removing the hash
-              if (window.history && window.history.replaceState) {
-                window.history.replaceState({}, document.title, window.location.pathname);
+              if (sessionError) {
+                console.error("Error setting session from hash tokens:", sessionError);
+                throw sessionError;
               }
               
-              setIsValidatingSession(false);
-              return;
+              if (data?.session) {
+                console.log("Successfully established session from hash tokens");
+                setHasValidSession(true);
+                setUserEmail(data.session.user.email || null);
+                
+                // Store in localStorage for redundancy
+                localStorage.setItem('hasValidSession', 'true');
+                localStorage.setItem('passwordResetEmail', data.session.user.email || '');
+                localStorage.setItem('passwordResetTimestamp', Date.now().toString());
+                localStorage.setItem('isRecoverySession', 'true');
+                
+                setIsValidatingSession(false);
+                return;
+              }
+            } catch (tokenError) {
+              console.error("Error processing token from hash:", tokenError);
             }
           }
         }
         
-        // Last resort: check if we have a valid session already
+        // If hash processing didn't work, check for session directly
         const { data } = await supabase.auth.getSession();
+        
         if (data?.session) {
-          console.log("Found existing valid session");
+          console.log("Found active session with user:", data.session.user.email);
           setHasValidSession(true);
           setUserEmail(data.session.user.email || null);
-        } else {
-          console.log("No valid session found through any method");
-          setError("Your password reset link has expired or is invalid. Please request a new one.");
+          setIsValidatingSession(false);
+          return;
         }
+        
+        // No valid session, check localStorage for recovery info as a fallback
+        if (typeof window !== 'undefined') {
+          if (localStorage.getItem('hasValidSession') === 'true') {
+            const email = localStorage.getItem('passwordResetEmail');
+            const timestamp = localStorage.getItem('passwordResetTimestamp');
+            
+            // Verify session is not expired (1 hour validity)
+            if (timestamp && (Date.now() - parseInt(timestamp)) < 3600000) {
+              console.log("Found valid recovery info in localStorage for:", email);
+              setHasValidSession(true);
+              setUserEmail(email || null);
+              setIsValidatingSession(false);
+              return;
+            } else {
+              // Clear expired data
+              localStorage.removeItem('hasValidSession');
+              localStorage.removeItem('passwordResetEmail');
+              localStorage.removeItem('passwordResetTimestamp');
+              localStorage.removeItem('isRecoverySession');
+            }
+          }
+        }
+        
+        console.log("No valid session found");
+        setError("Your password reset link has expired or is invalid. Please request a new one.");
       } catch (err) {
         console.error("Error processing auth state:", err);
         setError("An error occurred while processing your reset link.");
@@ -136,62 +159,10 @@ export default function ResetPasswordScreen() {
       }
     }
     
-    // Set up auth state change listener
-    const { data: authListener } = supabase.auth.onAuthStateChange((event, session) => {
-      console.log(`Auth state changed: ${event}`);
-      
-      if (event === 'PASSWORD_RECOVERY') {
-        console.log('Password recovery event detected');
-        
-        if (session?.user?.email) {
-          setHasValidSession(true);
-          setUserEmail(session.user.email || null);
-          setIsValidatingSession(false);
-          
-          // Store in localStorage
-          localStorage.setItem('hasValidSession', 'true');
-          localStorage.setItem('passwordResetEmail', session.user.email);
-          localStorage.setItem('passwordResetTimestamp', Date.now().toString());
-        }
-      }
-    });
-    
     processAuthState();
-    
-    return () => {
-      if (authListener && authListener.subscription) {
-        authListener.subscription.unsubscribe();
-      }
-    };
   }, []);
 
-  // Second useEffect - Add effect to block navigation during recovery session
-  // IMPORTANT: This must be defined before any conditional returns
-  useEffect(() => {
-    if (hasValidSession && typeof window !== 'undefined' && localStorage.getItem('isRecoverySession') === 'true') {
-      console.log("Blocking navigation during recovery session");
-      
-      // Function to handle before unload event
-      const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-        const message = "Please complete your password reset before leaving this page.";
-        e.returnValue = message;
-        return message;
-      };
-      
-      // Add event listener
-      window.addEventListener('beforeunload', handleBeforeUnload);
-      
-      // Clean up
-      return () => {
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-      };
-    }
-    
-    // Always return a cleanup function even if we don't add an event listener
-    return () => {};
-  }, [hasValidSession]);
-
-  // Show loading state - IMPORTANT: This comes AFTER all hooks
+  // Show loading state while validating session
   if (isValidatingSession) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -199,7 +170,32 @@ export default function ResetPasswordScreen() {
       </View>
     );
   }
+  
+  // Show error state if no valid session was established
+  if (!hasValidSession) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Surface style={styles.errorCard}>
+          <Text style={styles.heading}>Reset Link Expired</Text>
+          <Text style={styles.subheading}>Your reset link has expired or is invalid</Text>
+          <Text style={styles.errorText}>{error || "Your password reset link has expired or is invalid. Please request a new one."}</Text>
+          
+          <TouchableOpacity onPress={() => router.push('/forgot-password')} style={styles.requestNewButton}>
+            <Text style={styles.requestNewButtonText}>Request New Reset Link</Text>
+          </TouchableOpacity>
+          
+          <TouchableOpacity onPress={() => router.push('/login')} style={styles.backToLoginButton}>
+            <Text style={styles.backToLoginText}>Back to Login</Text>
+          </TouchableOpacity>
+        </Surface>
+      </View>
+    );
+  }
 
+  /**
+   * Handle password reset submission
+   * Validates the password, updates it with Supabase, and handles success/failure
+   */
   async function handleResetPassword() {
     // Validate form fields
     if (!password || !confirmPassword) {
@@ -222,7 +218,7 @@ export default function ResetPasswordScreen() {
     setLoading(true);
 
     try {
-      // Update password using the existing session
+      // Update password using the existing Supabase session
       const { error } = await supabase.auth.updateUser({ password });
       
       if (error) {
@@ -232,7 +228,7 @@ export default function ResetPasswordScreen() {
       // Success!
       setSuccessMessage('Your password has been updated successfully!');
       
-      // Clear localStorage data
+      // Clear localStorage data to remove recovery session markers
       localStorage.removeItem('hasValidSession');
       localStorage.removeItem('passwordResetEmail');
       localStorage.removeItem('passwordResetTimestamp');
@@ -260,99 +256,62 @@ export default function ResetPasswordScreen() {
     }
   }
 
-  // Handle requesting a new password reset
-  function handleRequestNewReset() {
-    router.replace('/forgot-password');
-  }
-
+  // Main reset password form
   return (
     <View style={styles.container}>
-      <Surface style={styles.formContainer} elevation={2}>
-        <Text variant="headlineMedium" style={styles.title}>
-          {hasValidSession ? 'Create New Password' : 'Reset Link Expired'}
-        </Text>
-        
-        <Text variant="bodyLarge" style={styles.subtitle}>
-          {hasValidSession 
-            ? 'Enter your new password below' 
-            : 'Your reset link has expired or is invalid'}
-        </Text>
-
-        {error && (
-          <HelperText type="error" visible={!!error}>
-            {error}
-          </HelperText>
-        )}
-
-        {successMessage && (
-          <HelperText type="info" visible={!!successMessage} style={styles.successMessage}>
-            {successMessage}
-          </HelperText>
+      <Surface style={styles.formContainer}>
+        <Text style={styles.heading}>Reset Your Password</Text>
+        {userEmail && (
+          <Text style={styles.subheading}>Enter a new password for {userEmail}</Text>
         )}
         
-        {hasValidSession ? (
+        {successMessage ? (
+          <Text style={styles.successText}>{successMessage}</Text>
+        ) : (
           <>
-            {userEmail && (
-              <Text style={styles.emailInfo}>
-                Setting new password for: <Text style={styles.emailHighlight}>{userEmail}</Text>
-              </Text>
-            )}
-            
             <TextInput
-              mode="outlined"
               label="New Password"
               value={password}
-              onChangeText={(text) => {
-                setPassword(text);
-                setError(null);
-              }}
-              style={styles.input}
+              onChangeText={setPassword}
               secureTextEntry={secureTextEntry}
-              left={<TextInput.Icon icon={() => <Lock size={20} color="#888" />} />}
-              right={<TextInput.Icon icon={secureTextEntry ? "eye" : "eye-off"} onPress={() => setSecureTextEntry(!secureTextEntry)} />}
+              right={
+                <TextInput.Icon 
+                  icon={secureTextEntry ? 'eye-off' : 'eye'} 
+                  onPress={() => setSecureTextEntry(!secureTextEntry)}
+                />
+              }
+              style={styles.input}
+              mode="outlined"
             />
             
             <TextInput
-              mode="outlined"
-              label="Confirm New Password"
+              label="Confirm Password"
               value={confirmPassword}
-              onChangeText={(text) => {
-                setConfirmPassword(text);
-                setError(null);
-              }}
-              style={styles.input}
+              onChangeText={setConfirmPassword}
               secureTextEntry={secureConfirmTextEntry}
-              left={<TextInput.Icon icon={() => <Lock size={20} color="#888" />} />}
-              right={<TextInput.Icon icon={secureConfirmTextEntry ? "eye" : "eye-off"} onPress={() => setSecureConfirmTextEntry(!secureConfirmTextEntry)} />}
+              right={
+                <TextInput.Icon 
+                  icon={secureConfirmTextEntry ? 'eye-off' : 'eye'} 
+                  onPress={() => setSecureConfirmTextEntry(!secureConfirmTextEntry)}
+                />
+              }
+              style={styles.input}
+              mode="outlined"
             />
+            
+            {error && <HelperText type="error">{error}</HelperText>}
             
             <Button 
               mode="contained" 
               onPress={handleResetPassword}
-              style={styles.button}
               loading={loading}
               disabled={loading}
+              style={styles.button}
             >
-              Update Password
+              Reset Password
             </Button>
           </>
-        ) : (
-          <Button 
-            mode="contained" 
-            onPress={handleRequestNewReset}
-            style={styles.button}
-          >
-            Request New Reset Link
-          </Button>
         )}
-        
-        <TouchableOpacity 
-          onPress={() => router.push('/login')}
-          style={styles.backButton}
-        >
-          <ArrowLeft size={20} color="#888" />
-          <Text style={styles.backButtonText}>Back to Login</Text>
-        </TouchableOpacity>
       </Surface>
     </View>
   );
@@ -417,5 +376,54 @@ const styles = StyleSheet.create({
   emailHighlight: {
     fontWeight: 'bold',
     color: '#fff',
+  },
+  errorCard: {
+    padding: 20,
+    borderRadius: 10,
+    elevation: 4,
+    alignItems: 'center',
+    maxWidth: 400,
+    width: '100%',
+  },
+  heading: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    marginBottom: 10,
+    textAlign: 'center',
+  },
+  subheading: {
+    fontSize: 16,
+    marginBottom: 20,
+    textAlign: 'center',
+    opacity: 0.7,
+  },
+  errorText: {
+    color: 'red',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  requestNewButton: {
+    marginTop: 20,
+    padding: 12,
+    backgroundColor: '#e21f70',
+    borderRadius: 5,
+    width: '100%',
+    alignItems: 'center',
+  },
+  requestNewButtonText: {
+    color: 'white',
+    fontWeight: 'bold',
+  },
+  backToLoginButton: {
+    marginTop: 12,
+    padding: 10,
+  },
+  backToLoginText: {
+    color: '#e21f70',
+  },
+  successText: {
+    color: '#4CAF50',
+    marginBottom: 16,
+    textAlign: 'center',
   },
 }); 
