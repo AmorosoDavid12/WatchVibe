@@ -1,0 +1,135 @@
+VibeWatch - Movie & TV Show Watchlist App
+
+Core Purpose
+
+A visually engaging, user-friendly app that helps users track movies and TV shows they want to watch and have already watched, preventing recommendations from being forgotten.
+
+Technical Requirements
+
+
+
+
+
+Mobile-first approach (with future web capabilities)
+
+
+
+Cross-platform: Android and iOS compatibility
+
+
+
+Publishable to both app stores
+
+
+
+Modern, dynamic design with smooth animations
+
+Main Features
+
+1. Watchlist/Home Page
+
+
+
+
+
+List of movies/TV shows to watch
+
+
+
+Each item includes: image, title, year, rating
+
+
+
+Interactive elements: watched button, watching button (only for tv shows), delete button (removes tittl from watchlist)
+
+
+
+Drag-and-drop reordering capability
+
+
+
+Filtering options: genres, time periods, type (movie/TV)
+
+
+
+2. Watched Page
+
+
+
+
+
+List of viewed content with similar layout to Watchlist
+
+
+
+"Rewatch" button replaces "Watched" button
+
+
+
+User ratings displayed
+
+3. Details Page
+
+
+
+
+
+Media gallery (images/videos) with swipe navigation
+
+
+
+Rating information with external links
+
+
+
+Duration/seasons/episodes information
+
+
+
+Spoiler-free description
+
+
+
+Director info with link to filtered search
+
+
+
+Cast list (collapsible) with links to filtered search
+
+
+
+Context-aware action buttons based on current status
+
+4. Seach page:
+
+
+
+
+
+Search functionality by title, actor, director
+
+5. First-time User Flow (not for initial development)
+
+
+
+
+
+First login prompts user to add at least 1 item to their watch list and 2 items that they've already watched (these to actions will be mage on a page that will not reapear in the future, these first actions are entirely skippable by pressing skip and skip)
+
+
+
+Tutorial overlay for first-time users (shows users where to search for tiotles)
+
+
+
+6. Future Concepts (not for initial development)
+
+
+
+
+
+Recommendation engine based on watched content
+
+
+
+Social features (friends, recommendations, public profiles)

@@ -5,6 +5,7 @@ import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import useAuth from '@/hooks/useAuth';
 import { View, Text } from 'react-native';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
+import Toast from 'react-native-toast-message';
 
 // Create custom theme based on dark theme
 const theme = {
@@ -39,6 +40,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="light" />
+      <Toast />
     </PaperProvider>
   );
 }

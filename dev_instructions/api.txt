@@ -1,0 +1,183 @@
+VibeWatch API Integration Guide (Revised with TMDb v3 Updates)
+Last validated against TMDb API documentation: September 2023
+
+Authentication & Configuration
+Base URL: https://api.themoviedb.org/3/
+
+API Key:
+
+Register at TMDb and add your key to the app’s environment variables (e.g., eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJhYTViOWRlZmFjZjM2M2U4NTA3YTZhZDc2YWRlYmMwOCIsIm5iZiI6MTc0MjAzMTM3Ny43NTksInN1YiI6IjY3ZDU0YTExOTE2NWYzNzExODAxMWRlNiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ._prxjv8E4jhpdNT-R8zJyikr1pvObvjtQhDUrx2Yyyg).
+
+Append ?api_key=eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJhYTViOWRlZmFjZjM2M2U4NTA3YTZhZDc2YWRlYmMwOCIsIm5iZiI6MTc0MjAzMTM3Ny43NTksInN1YiI6IjY3ZDU0YTExOTE2NWYzNzExODAxMWRlNiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ._prxjv8E4jhpdNT-R8zJyikr1pvObvjtQhDUrx2Yyyg&language=en-US to all requests.
+
+Image URLs:
+
+Posters: https://image.tmdb.org/t/p/w342/{poster_path} (optimal for mobile).
+
+Backdrops: https://image.tmdb.org/t/p/w780/{backdrop_path}.
+
+Core Endpoints & Implementation
+1. Watchlist/Home Page
+Objective: Display trending/popular content and user-curated watchlists.
+
+A. Initial Content Population
+Use /trending for default recommendations:
+
+http
+Copy
+GET /trending/{media_type}/{time_window}
+Parameters:
+
+media_type: all, movie, tv, person
+
+time_window: day, week
+
+Example:
+
+http
+Copy
+GET /trending/movie/week?api_key=eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiJhYTViOWRlZmFjZjM2M2U4NTA3YTZhZDc2YWRlYmMwOCIsIm5iZiI6MTc0MjAzMTM3Ny43NTksInN1YiI6IjY3ZDU0YTExOTE2NWYzNzExODAxMWRlNiIsInNjb3BlcyI6WyJhcGlfcmVhZCJdLCJ2ZXJzaW9uIjoxfQ._prxjv8E4jhpdNT-R8zJyikr1pvObvjtQhDUrx2Yyyg
+Response Mapping:
+
+json
+Copy
+{
+  "results": [
+    {
+      "id": 27205,
+      "title": "Inception", // "name" for TV
+      "poster_path": "/edv5CZvWj09upOsy2Y6IwDhK8bt.jpg",
+      "release_date": "2010-07-16", // "first_air_date" for TV
+      "vote_average": 8.3,
+      "media_type": "movie"
+    }
+  ]
+}
+B. Search for Titles/People
+
+http
+Copy
+GET /search/multi?query={search_term}&include_adult=false
+Parameters:
+
+query: Title, actor, or director.
+
+page: For pagination (default: 1).
+
+Filter Actors/Directors:
+Process results where media_type=person, then use known_for_department to differentiate:
+
+json
+Copy
+{
+  "results": [
+    {
+      "id": 525,
+      "name": "Christopher Nolan",
+      "known_for_department": "Directing",
+      "profile_path": "/f2PNMnzt ... jpg",
+      "known_for": [...] // Works they’re known for
+    }
+  ]
+}
+C. Filter Content
+Use /discover with dynamic filters:
+
+http
+Copy
+GET /discover/movie?with_genres=28&sort_by=popularity.desc&primary_release_year=2023
+Key Parameters:
+
+with_genres: Comma-separated genre IDs (fetch via /genre/movie/list).
+
+with_people: Comma-separated person IDs (e.g., directors).
+
+primary_release_year (movies) or first_air_date_year (TV).
+
+2. Details Page
+Objective: Show metadata, cast, trailers, and director.
+
+A. Fetch Full Details
+
+http
+Copy
+GET /movie/{movie_id}?append_to_response=credits,videos,images
+Response Highlights:
+
+json
+Copy
+{
+  "id": 27205,
+  "title": "Inception",
+  "runtime": 148,
+  "overview": "A thief who steals corporate secrets...",
+  "genres": [{"id": 28, "name": "Action"}],
+  "credits": {
+    "cast": [
+      {"id": 6193, "name": "Leonardo DiCaprio", "profile_path": "/jTo ... jpg"}
+    ],
+    "crew": [
+      {"id": 525, "name": "Christopher Nolan", "job": "Director"}
+    ]
+  },
+  "videos": {
+    "results": [
+      {"key": "YoHD9XEInc0", "site": "YouTube", "type": "Trailer"}
+    ]
+  }
+}
+B. Extract Director
+Filter crew array for job: "Director".
+
+C. Fetch Person Credits
+
+http
+Copy
+GET /person/{person_id}/movie_credits  // For movies
+GET /person/{person_id}/tv_credits     // For TV
+Use Case: When users click a director/actor, show their works.
+
+3. Image & Video Handling
+Posters: Use w342 for thumbnails, w780 for full-screen.
+
+Trailers: Embed using https://www.youtube.com/embed/{video_key}.
+
+Fallbacks: If poster_path is null, use TMDb’s placeholder:
+https://via.placeholder.com/342x513?text=No+Poster.
+
+Advanced Implementation Notes
+Rate Limits & Optimization
+Rate Limits: 40 requests/10 seconds. Use exponential backoff for retries.
+
+Caching: Cache responses locally (e.g., 24 hours for trending data).
+
+Pagination: Always include page parameter; TMDb returns total_pages.
+
+Genre Mapping
+Fetch genre lists at app startup:
+
+http
+Copy
+GET /genre/movie/list  
+GET /genre/tv/list
+Merge results into a unified list for filter UI.
+
+Example Workflow: Adding to Watchlist
+User searches "Inception" via /search/multi.
+
+Selects movie ID 27205.
+
+App saves id, title, poster_path, media_type to local watchlist.
+
+Details Page fetches /movie/27205 when opened.
+
+Future Feature Prep
+Recommendations:
+
+http
+Copy
+GET /movie/{movie_id}/recommendations
+User Ratings:
+TMDb doesn’t support custom ratings; store these locally.
+
+This documentation aligns with TMDb’s latest API structure. Test all endpoints with tools like Postman before implementation

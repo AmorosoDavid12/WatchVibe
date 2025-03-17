@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Film, Search, CircleCheck, CircleUser as UserCircle2 } from 'lucide-react-native';
+import { Search, CircleCheck, CircleUser as UserCircle2, Bookmark } from 'lucide-react-native';
 
 export default function TabLayout() {
   return (
@@ -11,16 +11,14 @@ export default function TabLayout() {
         },
         tabBarActiveTintColor: '#e21f70',
         tabBarInactiveTintColor: '#888',
-        headerStyle: {
-          backgroundColor: '#1a1a1a',
-        },
-        headerTintColor: '#fff',
+        headerShown: false,
       }}>
       <Tabs.Screen
         name="index"
         options={{
           title: 'Watchlist',
-          tabBarIcon: ({ size, color }) => <Film size={size} color={color} />,
+          tabBarIcon: ({ size, color, focused }) => <Bookmark size={size} color={color} fill={focused ? color : 'transparent'} />,
+          tabBarActiveTintColor: "rgb(255, 107, 107)",
         }}
       />
       <Tabs.Screen
@@ -28,6 +26,7 @@ export default function TabLayout() {
         options={{
           title: 'Watched',
           tabBarIcon: ({ size, color }) => <CircleCheck size={size} color={color} />,
+          tabBarActiveTintColor: "rgb(140, 82, 255)",
         }}
       />
       <Tabs.Screen
@@ -35,6 +34,7 @@ export default function TabLayout() {
         options={{
           title: 'Search',
           tabBarIcon: ({ size, color }) => <Search size={size} color={color} />,
+          tabBarActiveTintColor: "#2196F3",
         }}
       />
       <Tabs.Screen
