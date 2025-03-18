@@ -337,7 +337,7 @@ export default function useAuth() {
     // Check if we're on a protected route
     const isProtectedRoute = segments[0] === '(tabs)';
     const isAuthRoute = segments[0] === '(auth)' || currentPath.includes('login');
-    const isRootRoute = segments.length === 0;
+    const isRootRoute = segments.length <= 0;
     
     // Prevent direct navigation during logout flow to avoid loops
     const isLoggingOut = typeof window !== 'undefined' && 
