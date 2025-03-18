@@ -23,10 +23,11 @@ const theme = {
 
 export default function RootLayout() {
   useFrameworkReady();
-  const { authInitialized } = useAuth();
+  const { isLoggedIn, isLoading: authLoading, authInitialized } = useAuth();
   const [forceLoaded, setForceLoaded] = useState(false);
   const [dataInitialized, setDataInitialized] = useState(false);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
+  const [fadeLoading, setFadeLoading] = useState(false);
   
   // Get store actions
   const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
@@ -35,6 +36,31 @@ export default function RootLayout() {
   const watchedLoading = useWatchedStore(state => state.isLoading);
   const watchlistInitialized = useWatchlistStore(state => state.isInitialized);
   const watchedInitialized = useWatchedStore(state => state.isInitialized);
+  
+  // Debounce loading changes to prevent flickering
+  useEffect(() => {
+    let timer: NodeJS.Timeout;
+    
+    // Prevent flickering by delaying the loading state update 
+    const shouldBeLoading = !initialLoadComplete && (
+      (!authInitialized && !forceLoaded) || 
+      (watchlistLoading && watchedLoading) ||
+      (!watchlistInitialized && !watchedInitialized && !dataInitialized)
+    );
+    
+    if (shouldBeLoading) {
+      // Set loading immediately if needed
+      setFadeLoading(true);
+    } else {
+      // Delay hiding the loading state to prevent flicker
+      timer = setTimeout(() => {
+        setFadeLoading(false);
+      }, 500); // Half-second delay before hiding loader
+    }
+    
+    return () => clearTimeout(timer);
+  }, [authInitialized, forceLoaded, watchlistLoading, watchedLoading, 
+      watchlistInitialized, watchedInitialized, dataInitialized, initialLoadComplete]);
   
   // Safety timeout to prevent getting stuck on the loading screen
   useEffect(() => {
@@ -63,7 +89,7 @@ export default function RootLayout() {
 
   // Initialize data stores once auth is initialized
   useEffect(() => {
-    if (authInitialized || forceLoaded) {
+    if ((authInitialized || forceLoaded) && !dataInitialized) {
       // Start parallel sync operations
       const initializeData = async () => {
         try {
@@ -77,27 +103,39 @@ export default function RootLayout() {
         } catch (error) {
           console.error('Failed to initialize data stores:', error);
         } finally {
-          setDataInitialized(true);
-          setInitialLoadComplete(true);
+          // Set a small delay to ensure the UI is ready
+          setTimeout(() => {
+            setDataInitialized(true);
+            setInitialLoadComplete(true);
+          }, 300);
         }
       };
       
       initializeData();
     }
-  }, [authInitialized, forceLoaded]);
+  }, [authInitialized, forceLoaded, dataInitialized]);
   
-  // Only show the loading screen on initial load, not when switching pages
-  // Once initialLoadComplete is true, we never show the loading screen again
-  const isLoading = !initialLoadComplete && (
-    (!authInitialized && !forceLoaded) || 
-    (watchlistLoading && watchedLoading) ||
-    (!watchlistInitialized && !watchedInitialized && !dataInitialized)
-  );
+  // Mark loading complete when auth changes
+  useEffect(() => {
+    // When auth state changes from null to a value, it indicates auth is complete
+    if (isLoggedIn !== null && !initialLoadComplete) {
+      console.log('Auth state determined, setting initial load complete');
+      // Slight delay to ensure smooth transition
+      setTimeout(() => {
+        setInitialLoadComplete(true);
+      }, 200);
+    }
+  }, [isLoggedIn, initialLoadComplete]);
 
-  if (isLoading) {
+  if (fadeLoading) {
     return (
       <PaperProvider theme={theme}>
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' }}>
+        <View style={{ 
+          flex: 1, 
+          justifyContent: 'center', 
+          alignItems: 'center', 
+          backgroundColor: '#121212' 
+        }}>
           <ActivityIndicator size="large" color="#e21f70" />
           <Text style={{ color: '#fff', marginTop: 20 }}>Loading...</Text>
         </View>

@@ -19,6 +19,7 @@ export default function useAuth() {
   const [isLoggedIn, setIsLoggedIn] = useState<boolean | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [authInitialized, setAuthInitialized] = useState(false);
+  const [authStateChanges, setAuthStateChanges] = useState(0);
   const segments = useSegments();
   const router = useRouter();
   const [isRouterReady, setIsRouterReady] = useState(false);
@@ -140,6 +141,7 @@ export default function useAuth() {
    */
   useEffect(() => {
     let isComponentMounted = true;
+    let navigationDebounceTimer: NodeJS.Timeout | null = null;
     
     // Safety timeout to prevent getting stuck in the loading state
     const safetyTimeout = setTimeout(() => {
@@ -187,6 +189,9 @@ export default function useAuth() {
           console.log('No session found');
           setIsLoggedIn(false);
         }
+        
+        // Signal that auth has changed
+        setAuthStateChanges(prevChanges => prevChanges + 1);
       } catch (error) {
         console.error('Error getting initial session:', error);
         if (isComponentMounted) {
@@ -196,7 +201,13 @@ export default function useAuth() {
         if (isComponentMounted) {
           // Mark as initialized, regardless of success/failure
           setAuthInitialized(true);
-          setIsLoading(false);
+          
+          // Small delay before hiding loading screen to prevent flickering
+          setTimeout(() => {
+            if (isComponentMounted) {
+              setIsLoading(false);
+            }
+          }, 300);
         }
       }
     };
@@ -221,6 +232,11 @@ export default function useAuth() {
         if (isAuthCallbackPage) {
           console.log('In auth callback page, skipping navigation');
           return;
+        }
+
+        // Clear any pending navigation timers to prevent race conditions
+        if (navigationDebounceTimer) {
+          clearTimeout(navigationDebounceTimer);
         }
 
         /**
@@ -251,25 +267,32 @@ export default function useAuth() {
             setIsLoggedIn(false);
             
             // Force redirect to reset-password
-            router.replace('/reset-password');
+            navigationDebounceTimer = setTimeout(() => {
+              router.replace('/reset-password');
+            }, 100);
             return;
           }
         }
 
-        // Normal auth state change handling
-        if (session) {
-          console.log('User logged in, session present');
-          setIsLoggedIn(true);
-          
-          // Only sync data if the user is logged in
-          if (event === 'SIGNED_IN') {
-            console.log('User signed in, syncing data');
-            syncAllData();
+        // Signal that auth has changed
+        setAuthStateChanges(prevChanges => prevChanges + 1);
+
+        // Normal auth state change handling with debouncing
+        navigationDebounceTimer = setTimeout(() => {
+          if (session) {
+            console.log('User logged in, session present');
+            setIsLoggedIn(true);
+            
+            // Only sync data if the user is logged in
+            if (event === 'SIGNED_IN') {
+              console.log('User signed in, syncing data');
+              syncAllData();
+            }
+          } else {
+            console.log('User logged out, no session');
+            setIsLoggedIn(false);
           }
-        } else {
-          console.log('User logged out, no session');
-          setIsLoggedIn(false);
-        }
+        }, 100);
       }
     );
 
@@ -278,6 +301,9 @@ export default function useAuth() {
       console.log('Auth hook cleaning up');
       isComponentMounted = false;
       clearTimeout(safetyTimeout);
+      if (navigationDebounceTimer) {
+        clearTimeout(navigationDebounceTimer);
+      }
       subscription?.unsubscribe();
     };
   }, [router, segments, isRouterReady, syncWatchlist, syncWatched]);
@@ -292,6 +318,9 @@ export default function useAuth() {
     if (!isRouterReady || isLoggedIn === null || !authInitialized) {
       return;
     }
+
+    // Debounce navigation to prevent flickering
+    let navigationTimer: NodeJS.Timeout | null = null;
 
     // Get the current path
     const currentPath = segments.join('/');
@@ -318,21 +347,33 @@ export default function useAuth() {
       return;
     }
 
-    // Route protection logic
+    // Route protection logic with debouncing
     if (isLoggedIn) {
       // User is logged in
       if (isAuthRoute || isRootRoute) {
         console.log('User logged in but on auth route, redirecting to tabs');
-        router.replace('/(tabs)');
+        // Debounce navigation to prevent rapid redirects
+        navigationTimer = setTimeout(() => {
+          router.replace('/(tabs)');
+        }, 200);
       }
     } else {
       // User is NOT logged in
       if (isProtectedRoute) {
         console.log('User not logged in but on protected route, redirecting to login');
-        router.replace('/login');
+        // Debounce navigation to prevent rapid redirects
+        navigationTimer = setTimeout(() => {
+          router.replace('/login');
+        }, 200);
       }
     }
-  }, [isLoggedIn, segments, isRouterReady, authInitialized, router]);
+
+    return () => {
+      if (navigationTimer) {
+        clearTimeout(navigationTimer);
+      }
+    };
+  }, [isLoggedIn, segments, isRouterReady, authInitialized, router, authStateChanges]);
 
   return {
     isLoggedIn,
@@ -340,3 +381,4 @@ export default function useAuth() {
     authInitialized
   };
 }
+
