@@ -66,31 +66,22 @@ export default function SearchScreen() {
       const trendingResponse = await getTrending('day');
       setTrendingItems(trendingResponse.results.slice(0, 10));
       
-      // Set spotlight item - for now using the first trending item that's a movie
+      // Set spotlight item - using the first trending item that's a movie with required images
       const movieSpotlight = trendingResponse.results.find(item => 
         item.media_type === 'movie' && item.poster_path && item.backdrop_path
       );
       
       if (movieSpotlight) {
-        // For demo purposes, overriding with Dune Part Two info
-        setSpotlightItem({
-          ...movieSpotlight,
-          title: "Dune: Part Two",
-          id: 693134, // Dune Part Two ID
-          vote_average: 8.6,
-          release_date: "2024-03-01",
-          media_type: "movie",
-          overview: "Paul Atreides unites with Chani and the Fremen while seeking revenge against the conspirators who destroyed his family."
-        });
+        setSpotlightItem(movieSpotlight);
       }
       
-      // Get recommendations (for this demo, we'll use trending weekly as recommendations)
+      // Get recommendations (using trending weekly as recommendations)
       const recommendedResponse = await getTrending('week');
       setRecommendedItems(recommendedResponse.results
         .filter(item => item.id !== spotlightItem?.id)
         .slice(0, 6));
       
-      // Get new releases (for demo, we're using trending day but filtering to recent releases)
+      // Get new releases (using trending day but filtering to recent releases)
       const currentYear = new Date().getFullYear();
       const lastYear = currentYear - 1;
       const newReleasesFiltered = trendingResponse.results.filter(item => {
@@ -180,7 +171,7 @@ export default function SearchScreen() {
     }
   };
 
-  const renderMediaItem = (item: TMDbSearchResult, size: 'normal' | 'large' = 'normal') => {
+  const renderMediaItem = (item: TMDbSearchResult, size: 'normal' | 'large' | 'wide' = 'normal') => {
     if (item.media_type === 'person') return null;
 
     const inWatchlist = isInWatchlist(item.id);
@@ -189,8 +180,17 @@ export default function SearchScreen() {
     const year = new Date(item.release_date || item.first_air_date || '').getFullYear();
     const yearText = !isNaN(year) ? year.toString() : '';
     
-    const itemWidth = size === 'large' ? ITEM_WIDTH * 1.3 : ITEM_WIDTH;
-    const itemHeight = itemWidth * 1.5;
+    // Adjust dimensions based on size
+    let itemWidth = ITEM_WIDTH;
+    let itemHeight = itemWidth * 1.5;
+    
+    if (size === 'large') {
+      itemWidth = ITEM_WIDTH * 1.3;
+      itemHeight = itemWidth * 1.5;
+    } else if (size === 'wide') {
+      itemWidth = ITEM_WIDTH * 1.3;
+      itemHeight = itemWidth * 0.6; // Wide aspect ratio
+    }
 
     return (
       <TouchableOpacity
@@ -215,18 +215,20 @@ export default function SearchScreen() {
         
         <Image
           source={{
-            uri: item.poster_path
-              ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
-              : 'https://via.placeholder.com/342x513?text=No+Poster',
+            uri: size === 'wide' && item.backdrop_path
+              ? `https://image.tmdb.org/t/p/w500${item.backdrop_path}`
+              : item.poster_path
+                ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
+                : 'https://via.placeholder.com/342x513?text=No+Poster',
           }}
           style={[styles.poster, { width: itemWidth, height: itemHeight }]}
           resizeMode="cover"
         />
         
-        {size === 'large' && (
+        {(size === 'large' || size === 'wide') && (
           <View style={styles.rating}>
             <Star size={12} color="#FFD700" fill="#FFD700" />
-            <Text style={styles.ratingText}>{item.vote_average.toFixed(1)}</Text>
+            <Text style={styles.ratingText}>{item.vote_average?.toFixed(1)}</Text>
           </View>
         )}
         
@@ -234,7 +236,7 @@ export default function SearchScreen() {
           <Text style={styles.itemTitle} numberOfLines={2}>
             {title}
           </Text>
-          {size === 'large' && yearText && (
+          {(size === 'large' || size === 'wide') && yearText && (
             <Text style={styles.yearText}>{yearText}</Text>
           )}
         </View>
@@ -393,7 +395,7 @@ export default function SearchScreen() {
     );
   };
 
-  const renderHorizontalList = (title: string, items: TMDbSearchResult[], tag?: string) => {
+  const renderHorizontalList = (title: string, items: TMDbSearchResult[]) => {
     if (items.length === 0) return null;
     
     return (
@@ -404,13 +406,7 @@ export default function SearchScreen() {
             <Text style={styles.seeAllText}>See All</Text>
           </TouchableOpacity>
         </View>
-        
-        {tag && (
-          <View style={styles.tagContainer}>
-            <Text style={styles.tagText}>{tag}</Text>
-          </View>
-        )}
-        
+                
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -418,7 +414,7 @@ export default function SearchScreen() {
         >
           {items.map((item) => (
             <View key={`${title}-${item.id}`} style={styles.horizontalItem}>
-              {renderMediaItem(item, title === 'Trending Now' ? 'large' : 'normal')}
+              {renderMediaItem(item, title === 'Trending Now' ? 'wide' : 'normal')}
             </View>
           ))}
         </ScrollView>
@@ -456,13 +452,13 @@ export default function SearchScreen() {
           {renderSpotlight()}
           
           {/* Trending section */}
-          {renderHorizontalList('Trending Now', trendingItems, 'HOT')}
+          {renderHorizontalList('Trending Now', trendingItems)}
           
           {/* For You section */}
-          {renderHorizontalList('For You', recommendedItems, 'NEW')}
+          {renderHorizontalList('For You', recommendedItems)}
           
           {/* New Releases section */}
-          {renderHorizontalList('New Releases', newReleases, 'NEW')}
+          {renderHorizontalList('New Releases', newReleases)}
         </ScrollView>
       )}
       
@@ -525,7 +521,7 @@ const styles = StyleSheet.create({
   spotlightContainer: {
     height: 260,
     marginHorizontal: 16,
-    marginBottom: 24,
+    marginVertical: 16, // Add vertical margin to avoid overlap
     borderRadius: 12,
     overflow: 'hidden',
     position: 'relative',
@@ -619,21 +615,6 @@ const styles = StyleSheet.create({
   seeAllText: {
     color: '#4CAF50',
     fontSize: 14,
-  },
-  tagContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 16,
-    backgroundColor: '#E53935',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 4,
-    zIndex: 1,
-  },
-  tagText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
   },
   horizontalList: {
     paddingLeft: 16,
