@@ -66,10 +66,12 @@ export default function SearchScreen() {
       const trendingResponse = await getTrending('day');
       setTrendingItems(trendingResponse.results.slice(0, 10));
       
-      // Set spotlight item - using the first trending item that's a movie with required images
-      const movieSpotlight = trendingResponse.results.find(item => 
-        item.media_type === 'movie' && item.poster_path && item.backdrop_path
-      );
+      // Set spotlight item - get highest rated movie with backdrop
+      const sortedMovies = trendingResponse.results
+        .filter(item => item.media_type === 'movie' && item.backdrop_path && item.vote_average >= 7)
+        .sort((a, b) => b.vote_average - a.vote_average);
+      
+      const movieSpotlight = sortedMovies.length > 0 ? sortedMovies[0] : null;
       
       if (movieSpotlight) {
         setSpotlightItem(movieSpotlight);
@@ -377,17 +379,18 @@ export default function SearchScreen() {
             </Text>
             <Text style={styles.spotlightDot}>•</Text>
             <View style={styles.spotlightRating}>
-              <Star size={12} color="#FFD700" fill="#FFD700" />
+              <Star size={14} color="#FFD700" fill="#FFD700" />
               <Text style={styles.spotlightRatingText}>{spotlightItem.vote_average?.toFixed(1)}</Text>
             </View>
           </View>
-          <Text style={styles.spotlightOverview} numberOfLines={3}>
+          <Text style={styles.spotlightOverview} numberOfLines={2}>
             {spotlightItem.overview}
           </Text>
           <TouchableOpacity 
             style={styles.spotlightButton}
             onPress={() => handleAddToWatchlist(spotlightItem)}
           >
+            <Plus size={18} color="#fff" style={styles.spotlightButtonIcon} />
             <Text style={styles.spotlightButtonText}>Add to Watchlist</Text>
           </TouchableOpacity>
         </View>
@@ -519,12 +522,17 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   spotlightContainer: {
-    height: 260,
+    height: 300,
     marginHorizontal: 16,
-    marginVertical: 16, // Add vertical margin to avoid overlap
-    borderRadius: 12,
+    marginVertical: 16,
+    borderRadius: 16,
     overflow: 'hidden',
     position: 'relative',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 12,
+    elevation: 8,
   },
   spotlightImage: {
     width: '100%',
@@ -535,9 +543,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: '70%',
-    backgroundColor: 'rgba(0,0,0,0.8)',
-    backgroundImage: 'linear-gradient(to top, rgba(0,0,0,0.9), rgba(0,0,0,0))',
+    height: '60%',
+    // Note: backgroundImage with linear-gradient not supported in React Native
+    // Using backgroundColor with opacity instead
+    backgroundColor: 'rgba(0,0,0,0.9)',
   },
   spotlightContent: {
     position: 'absolute',
@@ -545,11 +554,12 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 16,
+    paddingTop: 60,
   },
   spotlightTitle: {
     color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
+    fontSize: 22,
+    fontWeight: '700',
     marginBottom: 8,
   },
   spotlightMeta: {
@@ -560,6 +570,7 @@ const styles = StyleSheet.create({
   spotlightYear: {
     color: '#ccc',
     fontSize: 14,
+    fontWeight: '500',
   },
   spotlightDot: {
     color: '#ccc',
@@ -569,6 +580,7 @@ const styles = StyleSheet.create({
   spotlightGenre: {
     color: '#ccc',
     fontSize: 14,
+    fontWeight: '500',
   },
   spotlightRating: {
     flexDirection: 'row',
@@ -577,24 +589,31 @@ const styles = StyleSheet.create({
   spotlightRatingText: {
     color: '#FFD700',
     fontSize: 14,
-    marginLeft: 2,
+    fontWeight: '500',
+    marginLeft: 4,
   },
   spotlightOverview: {
     color: '#ccc',
     fontSize: 14,
-    marginBottom: 12,
+    marginBottom: 16,
   },
   spotlightButton: {
-    backgroundColor: '#2196F3',
-    borderRadius: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
+    backgroundColor: '#3498db',
+    borderRadius: 22,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
     alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 44,
+  },
+  spotlightButtonIcon: {
+    marginRight: 6,
   },
   spotlightButtonText: {
     color: '#fff',
-    fontWeight: '500',
-    fontSize: 14,
+    fontWeight: '600',
+    fontSize: 15,
   },
   sectionContainer: {
     marginBottom: 24,
