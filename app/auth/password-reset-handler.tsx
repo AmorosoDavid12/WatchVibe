@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View, StyleSheet, ActivityIndicator } from 'react-native';
 import { Text } from 'react-native-paper';
 import { useRouter } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { supabase, getCurrentSession, logout } from '@/lib/supabase';
 
 export default function PasswordResetHandler() {
   const router = useRouter();
@@ -23,25 +23,25 @@ export default function PasswordResetHandler() {
         console.log("PasswordResetHandler: URL =", url);
         
         // First, get the user's session
-        const { data: sessionData } = await supabase.auth.getSession();
+        const session = await getCurrentSession();
         
         // Check if user has a valid session from Supabase verification
-        if (sessionData?.session) {
+        if (session) {
           console.log("PasswordResetHandler: User has a session from Supabase verification");
           
           // Store the email
-          if (sessionData.session.user?.email) {
-            localStorage.setItem('passwordResetEmail', sessionData.session.user.email);
+          if (session.user?.email) {
+            localStorage.setItem('passwordResetEmail', session.user.email);
           }
           
           // Store user ID
-          if (sessionData.session.user?.id) {
-            localStorage.setItem('passwordResetUserId', sessionData.session.user.id);
+          if (session.user?.id) {
+            localStorage.setItem('passwordResetUserId', session.user.id);
           }
           
           // Explicitly sign the user out to force password reset flow
           console.log("PasswordResetHandler: Signing user out to force password reset flow");
-          await supabase.auth.signOut();
+          await logout();
           
           // Redirect to reset password page with special recovery flag
           setTimeout(() => {
@@ -88,7 +88,7 @@ export default function PasswordResetHandler() {
               }
               
               // Sign out to force password reset flow
-              await supabase.auth.signOut();
+              await logout();
               
               // Redirect to reset password page with flag indicating successful verification
               setTimeout(() => {

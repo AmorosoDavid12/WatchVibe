@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSegments } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { supabase, getCurrentSession } from '@/lib/supabase';
 import { useWatchlistStore } from '@/lib/watchlistStore';
 import { useWatchedStore } from '@/lib/watchedStore';
 
@@ -33,14 +33,20 @@ export default function useAuth() {
       console.log('Starting data synchronization');
       // Create a promise that rejects after a timeout to avoid getting stuck
       const timeoutPromise = new Promise((_, reject) => {
-        setTimeout(() => reject(new Error('Data sync timeout')), 5000);
+        setTimeout(() => reject(new Error('Data sync timeout')), 8000); // Increased to 8 seconds
       });
       
       // Race the actual sync with the timeout
       await Promise.race([
-        Promise.all([
-          syncWatchlist(),
-          syncWatched()
+        Promise.allSettled([  // Changed from Promise.all to Promise.allSettled to handle partial failures
+          syncWatchlist().catch(err => {
+            console.log('Watchlist sync error, continuing:', err);
+            return null; // Return null to prevent the Promise from failing
+          }),
+          syncWatched().catch(err => {
+            console.log('Watched sync error, continuing:', err);
+            return null; // Return null to prevent the Promise from failing
+          })
         ]),
         timeoutPromise
       ]);
@@ -106,9 +112,9 @@ export default function useAuth() {
       try {
         // Check for recovery session marker in localStorage
         if (typeof window !== 'undefined' && localStorage.getItem('isRecoverySession') === 'true') {
-          const { data: sessionData } = await supabase.auth.getSession();
+          const session = await getCurrentSession();
           
-          if (sessionData?.session) {
+          if (session) {
             console.log('Recovery session detected, redirecting to reset-password');
             
             // Force navigation to reset password if not already there
@@ -149,11 +155,11 @@ export default function useAuth() {
       try {
         setIsLoading(true);
         console.log('Getting initial session...');
-        const { data: sessionData } = await supabase.auth.getSession();
+        const session = await getCurrentSession();
         
         if (!isComponentMounted) return;
         
-        if (sessionData?.session) {
+        if (session) {
           // IMPORTANT: Do not consider users in recovery mode as "logged in"
           // This prevents them from being redirected to the main app
           const isRecoverySession = typeof window !== 'undefined' && 
@@ -249,59 +255,88 @@ export default function useAuth() {
             return;
           }
         }
-        
-        // For non-recovery sessions, update logged in state and sync data
-        const isAuthenticated = !!session;
-        
-        // Get recovery session status
-        const isRecoverySession = typeof window !== 'undefined' && 
-                                localStorage.getItem('isRecoverySession') === 'true';
 
-        // Update login state based on session and recovery status
-        setIsLoggedIn(isAuthenticated && !isRecoverySession);
-
-        // If user just logged in and it's not a recovery session, sync data
-        if (isAuthenticated && !isRecoverySession) {
-          try {
-            // Don't await here - sync in the background
-            syncAllData().catch(error => {
-              console.error('Background sync error:', error);
-            });
-          } catch (syncError) {
-            console.error('Error during auth change data sync:', syncError);
-            // Continue even if sync fails
-          }
-        }
-
-        // Default protection - redirect based on auth state
-        const isAuthGroup = segments[0] === '(auth)';
-        
+        // Normal auth state change handling
         if (session) {
-          if (isRecoverySession) {
-            // If this is a recovery session, force redirect to reset password
-            if (!currentPath.includes('reset-password')) {
-              console.log('Recovery session active, redirecting to reset password');
-              router.replace('/reset-password');
-            }
-          } else if (isAuthGroup) {
-            // Normal logged in state - redirect to app
-            console.log('Redirecting to app tabs');
-            router.replace('/(tabs)');
+          console.log('User logged in, session present');
+          setIsLoggedIn(true);
+          
+          // Only sync data if the user is logged in
+          if (event === 'SIGNED_IN') {
+            console.log('User signed in, syncing data');
+            syncAllData();
           }
-        } else if (!session && !isAuthGroup) {
-          // Not logged in, not on auth page, redirect to login
-          console.log('Not logged in, redirecting to login');
-          router.replace('/login');
+        } else {
+          console.log('User logged out, no session');
+          setIsLoggedIn(false);
         }
       }
     );
 
+    // Cleanup on unmount
     return () => {
+      console.log('Auth hook cleaning up');
       isComponentMounted = false;
       clearTimeout(safetyTimeout);
-      subscription.unsubscribe();
+      subscription?.unsubscribe();
     };
-  }, [isRouterReady, router, segments, syncWatchlist, syncWatched]);
+  }, [router, segments, isRouterReady, syncWatchlist, syncWatched]);
 
-  return { isLoggedIn, isLoading, authInitialized };
+  /**
+   * Auth state + route protection effect
+   * Handles redirecting users based on auth state
+   * ONLY handles base path redirects, not recovery sessions (handled separately)
+   */
+  useEffect(() => {
+    // Only run navigation effects when everything is ready
+    if (!isRouterReady || isLoggedIn === null || !authInitialized) {
+      return;
+    }
+
+    // Get the current path
+    const currentPath = segments.join('/');
+    
+    // Skip special system routes
+    const isSystemRoute = currentPath.includes('_sitemap') || 
+                          currentPath.includes('_layout') ||
+                          currentPath.includes('auth/callback') ||
+                          currentPath.includes('reset-password');
+    if (isSystemRoute) {
+      return;
+    }
+
+    // Check if we're on a protected route
+    const isProtectedRoute = segments[0] === '(tabs)';
+    const isAuthRoute = segments[0] === '(auth)' || currentPath.includes('login');
+    const isRootRoute = segments.length === 0;
+    
+    // Prevent direct navigation during logout flow to avoid loops
+    const isLoggingOut = typeof window !== 'undefined' && 
+                        localStorage.getItem('loggingOut') === 'true';
+    
+    if (isLoggingOut) {
+      return;
+    }
+
+    // Route protection logic
+    if (isLoggedIn) {
+      // User is logged in
+      if (isAuthRoute || isRootRoute) {
+        console.log('User logged in but on auth route, redirecting to tabs');
+        router.replace('/(tabs)');
+      }
+    } else {
+      // User is NOT logged in
+      if (isProtectedRoute) {
+        console.log('User not logged in but on protected route, redirecting to login');
+        router.replace('/login');
+      }
+    }
+  }, [isLoggedIn, segments, isRouterReady, authInitialized, router]);
+
+  return {
+    isLoggedIn,
+    isLoading,
+    authInitialized
+  };
 }

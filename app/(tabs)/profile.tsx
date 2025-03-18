@@ -7,7 +7,7 @@ import {
   Image,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { supabase, getCurrentSession } from '@/lib/supabase';
 import { Settings, LogOut, Star } from 'lucide-react-native';
 import { Text, Button, Card, Avatar, ActivityIndicator, Divider, Surface } from 'react-native-paper';
 import { logout } from '@/lib/supabase';
@@ -28,6 +28,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [stats, setStats] = useState({
     totalWatched: 0,
     avgRating: 0,
@@ -35,14 +36,43 @@ export default function ProfileScreen() {
   });
 
   useEffect(() => {
-    fetchProfile();
-    fetchStats();
+    // Create a main loading function with timeout
+    const loadProfileData = async () => {
+      // Set a timeout for the entire loading process
+      const timeout = setTimeout(() => {
+        if (loading) {
+          console.log('Profile data loading timed out');
+          setLoading(false);
+          setError('Loading timed out. Please try again.');
+        }
+      }, 5000); // 5 seconds timeout
+
+      try {
+        // Run both fetch operations in parallel
+        await Promise.all([
+          fetchProfile(),
+          fetchStats()
+        ]);
+      } catch (error) {
+        console.error('Error loading profile data:', error);
+        setError('Failed to load profile data');
+      } finally {
+        clearTimeout(timeout);
+        setLoading(false);
+      }
+    };
+
+    loadProfileData();
   }, []);
 
   async function fetchProfile() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
+      console.log('Fetching user profile data');
+      // Use our enhanced getCurrentSession instead of direct Supabase call
+      const session = await getCurrentSession();
+      
+      if (session?.user) {
+        const user = session.user;
         // Get user data directly from auth session
         setProfile({
           id: user.id,
@@ -50,51 +80,81 @@ export default function ProfileScreen() {
           username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
           avatar_url: user.user_metadata?.avatar_url
         });
+        console.log('Profile data loaded successfully');
+      } else {
+        throw new Error('No authenticated user found');
       }
     } catch (error) {
       console.error('Error fetching profile:', error);
-    } finally {
-      setLoading(false);
+      throw error; // Propagate the error to the parent promise
     }
   }
 
   async function fetchStats() {
     try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: watched, error } = await supabase
-          .from('watched')
-          .select('*')
-          .eq('user_id', user.id);
+      console.log('Fetching user stats');
+      const session = await getCurrentSession();
+      
+      if (!session?.user) {
+        console.log('No authenticated user found for stats');
+        return;
+      }
+      
+      // Add a race with timeout to prevent hanging
+      const statsPromise = supabase
+        .from('watched')
+        .select('*')
+        .eq('user_id', session.user.id);
+      
+      const timeoutPromise = new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Stats query timed out')), 3000)
+      );
+      
+      const { data: watched, error } = await Promise.race([
+        statsPromise,
+        timeoutPromise
+      ]) as any;
 
-        if (error) {
-          console.error('Error fetching stats:', error);
-          return;
-        }
+      if (error) {
+        console.error('Error fetching stats:', error);
+        return;
+      }
 
-        if (watched && watched.length > 0) {
-          const totalWatched = watched.length;
-          const avgRating = watched.reduce((acc: number, curr: WatchedItem) => acc + (curr.rating || 0), 0) / (totalWatched || 1);
-          const watchTime = watched.reduce((acc: number, curr: WatchedItem) => acc + (curr.duration || 0), 0);
+      if (watched && watched.length > 0) {
+        const totalWatched = watched.length;
+        const avgRating = watched.reduce((acc: number, curr: WatchedItem) => acc + (curr.rating || 0), 0) / (totalWatched || 1);
+        const watchTime = watched.reduce((acc: number, curr: WatchedItem) => acc + (curr.duration || 0), 0);
 
-          setStats({
-            totalWatched,
-            avgRating: Math.round(avgRating * 10) / 10 || 0,
-            watchTime: Math.round(watchTime / 60) || 0, // Convert to hours
-          });
-        }
+        setStats({
+          totalWatched,
+          avgRating: Math.round(avgRating * 10) / 10 || 0,
+          watchTime: Math.round(watchTime / 60) || 0, // Convert to hours
+        });
+        console.log('Stats loaded successfully');
       }
     } catch (error) {
       console.error('Error fetching stats:', error);
+      // Don't propagate stats errors, they're non-critical
+      // But we'll still show data that we have
     }
   }
 
   async function handleSignOut() {
     try {
-      await logout();
+      setLoading(true);
+      
+      // Force navigation to login page immediately, don't wait for logout to complete
       router.replace('/login');
+      
+      // Then perform logout in the background
+      // The logout function has been improved to not get stuck and to clean up localStorage
+      await logout().catch(error => {
+        console.error('Error in logout (background):', error);
+        // Errors are already handled in the logout function
+      });
     } catch (error) {
       console.error('Error signing out:', error);
+      // No need to navigate here as we already did it at the beginning
     }
   }
 
@@ -103,6 +163,26 @@ export default function ProfileScreen() {
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator animating={true} size="large" color="#e21f70" />
         <Text style={styles.loadingText}>Loading profile...</Text>
+      </View>
+    );
+  }
+
+  if (error) {
+    return (
+      <View style={[styles.container, styles.centered]}>
+        <Text style={styles.errorText}>{error}</Text>
+        <Button 
+          mode="contained" 
+          onPress={() => {
+            setError(null);
+            setLoading(true);
+            fetchProfile().catch(() => setLoading(false));
+            fetchStats().catch(() => {});
+          }}
+          style={styles.retryButton}
+        >
+          Retry
+        </Button>
       </View>
     );
   }
@@ -168,6 +248,7 @@ export default function ProfileScreen() {
         style={styles.signOutButton}
         icon={() => <LogOut size={20} color="#fff" />}
         onPress={handleSignOut}
+        loading={loading}
       >
         Sign Out
       </Button>
@@ -187,6 +268,15 @@ const styles = StyleSheet.create({
   loadingText: {
     marginTop: 16,
     color: '#fff',
+  },
+  errorText: {
+    color: '#e21f70',
+    marginBottom: 16,
+    textAlign: 'center',
+    padding: 16,
+  },
+  retryButton: {
+    marginTop: 10,
   },
   header: {
     padding: 20,

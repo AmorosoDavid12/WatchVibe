@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { resetPassword } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Mail, ArrowLeft } from 'lucide-react-native';
 
@@ -22,18 +22,8 @@ export default function ForgotPasswordScreen() {
     setLoading(true);
 
     try {
-      // Get current URL origin for redirect
-      let redirectUrl;
-      if (typeof window !== 'undefined') {
-        // In web environment
-        const origin = window.location.origin;
-        redirectUrl = `${origin}/reset-password`;
-      }
-
-      // Send password reset email with type parameter
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: redirectUrl ? `${redirectUrl}?type=recovery` : undefined
-      });
+      // Use the enhanced resetPassword function from lib/supabase
+      const { error } = await resetPassword(email);
       
       if (error) throw error;
       

@@ -1,7 +1,7 @@
 ﻿import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { supabase, getCurrentSession, updatePassword, logout } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
 import { Lock, ArrowLeft } from 'lucide-react-native';
 
@@ -116,12 +116,12 @@ export default function ResetPasswordScreen() {
         }
         
         // If hash processing didn't work, check for session directly
-        const { data } = await supabase.auth.getSession();
+        const session = await getCurrentSession();
         
-        if (data?.session) {
-          console.log("Found active session with user:", data.session.user.email);
+        if (session) {
+          console.log("Found active session with user:", session.user.email);
           setHasValidSession(true);
-          setUserEmail(data.session.user.email || null);
+          setUserEmail(session.user.email || null);
           setIsValidatingSession(false);
           return;
         }
@@ -219,7 +219,7 @@ export default function ResetPasswordScreen() {
 
     try {
       // Update password using the existing Supabase session
-      const { error } = await supabase.auth.updateUser({ password });
+      const { error } = await updatePassword(password);
       
       if (error) {
         throw error;
@@ -237,7 +237,7 @@ export default function ResetPasswordScreen() {
       // Wait a moment before redirecting to login
       setTimeout(() => {
         // Sign out first to clear the session
-        supabase.auth.signOut().then(() => {
+        logout().then(() => {
           router.replace('/login');
         });
       }, 2000);
