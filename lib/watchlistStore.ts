@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
+import { supabase } from './supabase';
 
 export interface WatchlistItem {
   id: number;
@@ -24,6 +25,7 @@ interface WatchlistState {
   removeItem: (id: number) => void;
   reorderItems: (items: WatchlistItem[]) => void;
   hasItem: (id: number) => boolean;
+  syncWithSupabase: () => Promise<void>;
 }
 
 export const useWatchlistStore = create<WatchlistState>()(
@@ -38,19 +40,79 @@ export const useWatchlistStore = create<WatchlistState>()(
         set((state) => ({
           items: [...state.items, item],
         }));
+        
+        // Sync with Supabase
+        const userId = supabase.auth.getUser().then(({ data }) => {
+          if (data?.user) {
+            supabase.from('watchlist').upsert({
+              user_id: data.user.id,
+              item_id: item.id,
+              item_data: item,
+              created_at: new Date().toISOString()
+            });
+          }
+        });
+        
         return true;
       },
-      removeItem: (id) =>
+      removeItem: (id) => {
         set((state) => ({
           items: state.items.filter((item) => item.id !== id),
-        })),
-      reorderItems: (items) =>
+        }));
+        
+        // Remove from Supabase
+        const userId = supabase.auth.getUser().then(({ data }) => {
+          if (data?.user) {
+            supabase.from('watchlist')
+              .delete()
+              .match({ user_id: data.user.id, item_id: id });
+          }
+        });
+      },
+      reorderItems: (items) => {
         set(() => ({
           items,
-        })),
+        }));
+        
+        // Update order in Supabase
+        const userId = supabase.auth.getUser().then(({ data }) => {
+          if (data?.user) {
+            // Get existing items and delete them
+            items.forEach((item, index) => {
+              supabase.from('watchlist').upsert({
+                user_id: data.user.id,
+                item_id: item.id,
+                item_data: item,
+                order: index
+              });
+            });
+          }
+        });
+      },
       hasItem: (id) => {
         return get().items.some((item) => item.id === id);
       },
+      syncWithSupabase: async () => {
+        try {
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData?.user) {
+            // Fetch watchlist from Supabase
+            const { data: watchlistData, error } = await supabase
+              .from('watchlist')
+              .select('*')
+              .eq('user_id', userData.user.id)
+              .order('order');
+              
+            if (!error && watchlistData) {
+              // Create a new array with the items sorted by order
+              const items = watchlistData.map(item => item.item_data as WatchlistItem);
+              set({ items });
+            }
+          }
+        } catch (error) {
+          console.error('Error syncing with Supabase:', error);
+        }
+      }
     }),
     {
       name: 'watchlist-storage',

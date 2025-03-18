@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useRouter, useSegments } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { useWatchlistStore } from '@/lib/watchlistStore';
+import { useWatchedStore } from '@/lib/watchedStore';
 
 /**
  * Authentication Hook
@@ -20,6 +22,22 @@ export default function useAuth() {
   const segments = useSegments();
   const router = useRouter();
   const [isRouterReady, setIsRouterReady] = useState(false);
+  
+  // Get the sync functions from stores
+  const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
+  const syncWatched = useWatchedStore(state => state.syncWithSupabase);
+
+  // Function to sync all data
+  const syncAllData = async () => {
+    try {
+      await Promise.all([
+        syncWatchlist(),
+        syncWatched()
+      ]);
+    } catch (error) {
+      console.error('Error syncing data:', error);
+    }
+  };
 
   // Check if router is ready - important to prevent navigation before router is mounted
   useEffect(() => {
@@ -111,7 +129,13 @@ export default function useAuth() {
                                     localStorage.getItem('isRecoverySession') === 'true';
           
           // Only consider the user logged in if it's NOT a recovery session
-          setIsLoggedIn(!isRecoverySession ? true : false);
+          const isLoggedInState = !isRecoverySession;
+          setIsLoggedIn(isLoggedInState);
+          
+          // If logged in and not in recovery, sync data
+          if (isLoggedInState) {
+            await syncAllData();
+          }
         } else {
           setIsLoggedIn(false);
         }
@@ -131,7 +155,7 @@ export default function useAuth() {
 
     // Set up auth state change subscriber
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
+      async (event, session) => {
         console.log('Auth state changed:', event, 'Is recovery session:', localStorage.getItem('isRecoverySession'));
         
         // Skip if router not ready to prevent navigation errors
@@ -179,15 +203,19 @@ export default function useAuth() {
           }
         }
         
-        // For non-recovery sessions, update logged in state normally
-        setIsLoggedIn(!!session);
+        // For non-recovery sessions, update logged in state and sync data
+        const isAuthenticated = !!session;
+        const isRecoverySession = typeof window !== 'undefined' && 
+                               localStorage.getItem('isRecoverySession') === 'true';
+        setIsLoggedIn(isAuthenticated);
+
+        // If user just logged in and it's not a recovery session, sync data
+        if (isAuthenticated && !isRecoverySession) {
+          await syncAllData();
+        }
 
         // Default protection - redirect based on auth state
         const isAuthGroup = segments[0] === '(auth)';
-        
-        // Final check for recovery session flag
-        const isRecoverySession = typeof window !== 'undefined' && 
-                                localStorage.getItem('isRecoverySession') === 'true';
         
         if (session) {
           if (isRecoverySession) {
@@ -210,7 +238,7 @@ export default function useAuth() {
     return () => {
       subscription.unsubscribe();
     };
-  }, [isRouterReady, router, segments]);
+  }, [isRouterReady, router, segments, syncWatchlist, syncWatched]);
 
   return { isLoggedIn, isLoading, authInitialized };
 }
