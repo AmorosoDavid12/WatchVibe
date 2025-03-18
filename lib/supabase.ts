@@ -102,20 +102,7 @@ export const supabase = createClient(
 export async function getCurrentSession() {
   try {
     console.log('Getting current auth session...');
-    
-    // Create a timeout promise to prevent hanging
-    const timeoutPromise = new Promise((resolve) => 
-      setTimeout(() => {
-        console.log('Session fetch timed out, returning null');
-        resolve({ data: { session: null }, error: null });
-      }, 5000)
-    );
-    
-    // Race the session fetch against the timeout
-    const result = await Promise.race([
-      supabase.auth.getSession(),
-      timeoutPromise
-    ]) as any;
+    const result = await supabase.auth.getSession();
     
     if (result.data?.session) {
       console.log('Session found:', {
@@ -135,19 +122,36 @@ export async function getCurrentSession() {
 }
 
 export async function login(email: string, password: string) {
-  console.log(`Logging in user ${email}...`);
-  const result = await supabase.auth.signInWithPassword({
-    email: email,
-    password: password,
-  });
-  
-  if (result.error) {
-    console.error('Login error:', result.error);
-  } else {
-    console.log('Login successful');
+  try {
+    console.log(`Logging in user ${email}...`);
+    
+    // First, clear any existing session if there is one
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token');
+      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier');
+    }
+    
+    const result = await supabase.auth.signInWithPassword({
+      email: email,
+      password: password,
+    });
+    
+    if (result.error) {
+      console.error('Login error:', result.error);
+    } else {
+      console.log('Login successful:', {
+        user: result.data?.user?.email,
+        session_expires_at: result.data?.session?.expires_at
+          ? new Date(result.data.session.expires_at * 1000).toLocaleString()
+          : 'unknown'
+      });
+    }
+    
+    return result;
+  } catch (error) {
+    console.error('Unexpected error during login:', error);
+    return { data: { user: null, session: null }, error };
   }
-  
-  return result;
 }
 
 export async function logout() {
@@ -159,15 +163,7 @@ export async function logout() {
     }
     
     // Clear localStorage directly first to ensure client state is cleared immediately
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token');
-      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier');
-      localStorage.removeItem('passwordResetEmail');
-      localStorage.removeItem('passwordResetTimestamp');
-      localStorage.removeItem('isRecoverySession');
-      localStorage.removeItem('hasValidSession');
-      localStorage.removeItem('passwordResetUserId');
-    }
+    clearAuthTokens();
     
     // Set a timeout to ensure we don't hang
     const timeoutPromise = new Promise((resolve) => 
@@ -277,4 +273,32 @@ export async function initializeUserData() {
   // This function will be called after successful login to ensure
   // that user-specific data is properly initialized
   return true;
+}
+
+// Add a utility function to clear all auth tokens
+export function clearAuthTokens() {
+  try {
+    console.log('Clearing all authentication tokens...');
+    
+    if (typeof window !== 'undefined') {
+      // Remove Supabase tokens
+      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token');
+      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier');
+      
+      // Remove other auth-related tokens
+      localStorage.removeItem('passwordResetEmail');
+      localStorage.removeItem('passwordResetTimestamp');
+      localStorage.removeItem('isRecoverySession');
+      localStorage.removeItem('hasValidSession');
+      localStorage.removeItem('passwordResetUserId');
+      localStorage.removeItem('loggingOut');
+      
+      console.log('Auth tokens cleared successfully');
+      return true;
+    }
+    return false;
+  } catch (error) {
+    console.error('Error clearing auth tokens:', error);
+    return false;
+  }
 }

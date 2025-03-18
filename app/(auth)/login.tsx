@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { supabase } from '@/lib/supabase';
+import { supabase, login, signInWithGoogle, clearAuthTokens } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText, Divider } from 'react-native-paper';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
 import * as Linking from 'expo-linking';
@@ -62,28 +62,62 @@ export default function LoginScreen() {
     checkForPasswordReset();
   }, []);
 
-  async function handleLogin() {
+  const handleLogin = async () => {
     if (!email || !password) {
-      setError('Please fill in all fields');
+      setError('Email and password are required');
       return;
     }
 
-    setError(null);
     setLoading(true);
+    setError(null);
 
     try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
-
-      if (error) throw error;
-      router.replace('/(tabs)');
+      // Clear all tokens before attempting login
+      clearAuthTokens();
+      
+      const { error } = await login(email, password);
+      
+      if (error) {
+        console.error('Login error:', error);
+        setError(typeof error === 'object' && error !== null ? 
+          (error as any).message || 'Failed to login' : 
+          'Failed to login');
+        setLoading(false);
+      } else {
+        console.log('Login successful, redirecting...');
+        router.replace('/(tabs)');
+      }
     } catch (error: any) {
-      setError(error.message || 'An error occurred during login');
+      console.error('Login exception:', error);
+      setError('An unexpected error occurred');
       setLoading(false);
     }
-  }
+  };
+
+  const handleGoogleLogin = async () => {
+    setLoading(true);
+    setError(null);
+    
+    try {
+      // Clear tokens first
+      clearAuthTokens();
+      
+      const { error } = await signInWithGoogle();
+      
+      if (error) {
+        console.error('Google login error:', error);
+        setError(typeof error === 'object' && error !== null ? 
+          (error as any).message || 'Failed to login with Google' : 
+          'Failed to login with Google');
+        setLoading(false);
+      }
+      // If successful, the OAuth redirect will happen automatically
+    } catch (error: any) {
+      console.error('Google login exception:', error);
+      setError('An unexpected error occurred during Google login');
+      setLoading(false);
+    }
+  };
 
   async function handlePasswordUpdate() {
     if (!password || !confirmPassword) {
@@ -234,6 +268,16 @@ export default function LoginScreen() {
               disabled={loading}
             >
               Login
+            </Button>
+            
+            <Button 
+              mode="contained" 
+              onPress={handleGoogleLogin}
+              style={styles.button}
+              loading={loading}
+              disabled={loading}
+            >
+              Login with Google
             </Button>
             
             <View style={styles.footer}>
