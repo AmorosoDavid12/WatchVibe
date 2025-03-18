@@ -4,6 +4,106 @@ import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import * as constants from '../constants';
 
+// Session manager to cache session and avoid multiple simultaneous requests
+class SessionManager {
+  private static instance: SessionManager;
+  private sessionPromise: Promise<any> | null = null;
+  private lastFetchTime: number = 0;
+  private cachedSession: any = null;
+  private sessionRefreshTimeout: any = null;
+  private isRefreshing: boolean = false;
+
+  // Session refresh interval (15 minutes)
+  private REFRESH_INTERVAL = 15 * 60 * 1000; 
+  // Minimum time between getSession calls (2 seconds)
+  private MIN_FETCH_INTERVAL = 2000;
+  
+  private constructor() {}
+
+  public static getInstance(): SessionManager {
+    if (!SessionManager.instance) {
+      SessionManager.instance = new SessionManager();
+    }
+    return SessionManager.instance;
+  }
+
+  public async getSession(): Promise<any> {
+    const now = Date.now();
+    
+    // If we have a recent cached session, return it immediately
+    if (this.cachedSession && (now - this.lastFetchTime < this.MIN_FETCH_INTERVAL)) {
+      console.log('Using cached session (recent)');
+      return this.cachedSession;
+    }
+    
+    // If there's already a session request in progress, return that promise
+    if (this.sessionPromise && (now - this.lastFetchTime < this.MIN_FETCH_INTERVAL)) {
+      console.log('Using in-progress session fetch');
+      return this.sessionPromise;
+    }
+    
+    // Otherwise, fetch a new session
+    console.log('Fetching fresh session from auth provider');
+    this.lastFetchTime = now;
+    
+    try {
+      this.sessionPromise = supabase.auth.getSession();
+      const result = await this.sessionPromise;
+      this.cachedSession = result;
+      
+      // Schedule session refresh
+      this.scheduleSessionRefresh();
+      
+      return result;
+    } catch (error) {
+      console.error('Error fetching session:', error);
+      return { data: { session: null }, error };
+    } finally {
+      this.sessionPromise = null;
+    }
+  }
+  
+  public clearSession(): void {
+    console.log('Clearing cached session');
+    this.cachedSession = null;
+    this.lastFetchTime = 0;
+    if (this.sessionRefreshTimeout) {
+      clearTimeout(this.sessionRefreshTimeout);
+      this.sessionRefreshTimeout = null;
+    }
+  }
+  
+  private scheduleSessionRefresh(): void {
+    // Clear any existing timeout
+    if (this.sessionRefreshTimeout) {
+      clearTimeout(this.sessionRefreshTimeout);
+    }
+    
+    // Set a new timeout to refresh the session
+    this.sessionRefreshTimeout = setTimeout(() => {
+      this.refreshSession();
+    }, this.REFRESH_INTERVAL);
+  }
+  
+  private async refreshSession(): Promise<void> {
+    if (this.isRefreshing) return;
+    
+    try {
+      this.isRefreshing = true;
+      console.log('Refreshing auth session...');
+      const result = await supabase.auth.getSession();
+      this.cachedSession = result;
+      this.lastFetchTime = Date.now();
+      console.log('Session refreshed successfully');
+    } catch (error) {
+      console.error('Error refreshing session:', error);
+    } finally {
+      this.isRefreshing = false;
+      this.scheduleSessionRefresh();
+    }
+  }
+}
+
 // Enhanced storage adapter with better logging and error handling
 const EnhancedStorageAdapter = {
   getItem: async (key: string) => {
@@ -68,7 +168,7 @@ export const supabase = createClient(
         // Get the current session access token if available
         let accessToken = constants.SUPABASE_ANON_KEY;
         try {
-          const { data } = await supabase.auth.getSession();
+          const { data } = await SessionManager.getInstance().getSession();
           if (data?.session?.access_token) {
             accessToken = data.session.access_token;
             console.log('Using user access token for request');
@@ -102,7 +202,7 @@ export const supabase = createClient(
 export async function getCurrentSession() {
   try {
     console.log('Getting current auth session...');
-    const result = await supabase.auth.getSession();
+    const result = await SessionManager.getInstance().getSession();
     
     if (result.data?.session) {
       console.log('Session found:', {
@@ -130,6 +230,9 @@ export async function login(email: string, password: string) {
       localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token');
       localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier');
     }
+    
+    // Clear any cached session
+    SessionManager.getInstance().clearSession();
     
     const result = await supabase.auth.signInWithPassword({
       email: email,
@@ -161,6 +264,9 @@ export async function logout() {
     if (typeof window !== 'undefined') {
       localStorage.setItem('loggingOut', 'true');
     }
+    
+    // Clear any cached session
+    SessionManager.getInstance().clearSession();
     
     // Clear localStorage directly first to ensure client state is cleared immediately
     clearAuthTokens();
@@ -200,6 +306,10 @@ export async function logout() {
 
 export async function register(email: string, password: string) {
   console.log(`Registering user ${email}...`);
+  
+  // Clear any cached session
+  SessionManager.getInstance().clearSession();
+  
   return await supabase.auth.signUp({
     email: email,
     password: password,
@@ -213,6 +323,9 @@ export async function resetPassword(email: string) {
   try {
     // Sign out first to clear any existing session
     await supabase.auth.signOut();
+    
+    // Clear any cached session
+    SessionManager.getInstance().clearSession();
     
     console.log("Reset password for email:", email);
     
@@ -242,12 +355,20 @@ export async function resetPassword(email: string) {
 }
 
 export async function updatePassword(password: string) {
-  return await supabase.auth.updateUser({
+  const result = await supabase.auth.updateUser({
     password: password,
   });
+  
+  // Clear and refresh the session cache after password update
+  SessionManager.getInstance().clearSession();
+  
+  return result;
 }
 
 export async function signInWithGoogle() {
+  // Clear any cached session
+  SessionManager.getInstance().clearSession();
+  
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: 'google',
     options: {
@@ -299,6 +420,46 @@ export function clearAuthTokens() {
     return false;
   } catch (error) {
     console.error('Error clearing auth tokens:', error);
+    return false;
+  }
+}
+
+// Add a new helper function to check and refresh auth status
+export async function verifyAuthState(): Promise<boolean> {
+  try {
+    console.log('Verifying authentication state...');
+    const session = await getCurrentSession();
+    
+    if (!session) {
+      console.log('No valid session found');
+      return false;
+    }
+    
+    // Check if token is expired or will expire soon (within 5 minutes)
+    const expiresAt = session.expires_at;
+    const now = Math.floor(Date.now() / 1000);
+    const fiveMinutes = 5 * 60;
+    
+    if (expiresAt && expiresAt < now + fiveMinutes) {
+      console.log('Session expired or expiring soon, refreshing...');
+      try {
+        const { data, error } = await supabase.auth.refreshSession();
+        if (error) {
+          console.error('Failed to refresh session:', error);
+          return false;
+        }
+        console.log('Session refreshed successfully');
+        SessionManager.getInstance().clearSession();
+        return !!data.session;
+      } catch (refreshError) {
+        console.error('Error during session refresh:', refreshError);
+        return false;
+      }
+    }
+    
+    return true;
+  } catch (error) {
+    console.error('Error verifying auth state:', error);
     return false;
   }
 }

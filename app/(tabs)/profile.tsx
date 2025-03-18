@@ -8,7 +8,7 @@ import {
   Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase, getCurrentSession } from '@/lib/supabase';
+import { supabase, getCurrentSession, verifyAuthState } from '@/lib/supabase';
 import { Settings, LogOut, Star } from 'lucide-react-native';
 import { Text, Button, Card, Avatar, ActivityIndicator, Divider, Surface } from 'react-native-paper';
 import { logout } from '@/lib/supabase';
@@ -25,11 +25,14 @@ interface Profile {
   email?: string;
 }
 
+const MAX_RETRIES = 2;
+
 export default function ProfileScreen() {
   const router = useRouter();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [fetchRetryCount, setFetchRetryCount] = useState(0);
   const [stats, setStats] = useState({
     totalWatched: 0,
     avgRating: 0,
@@ -43,68 +46,95 @@ export default function ProfileScreen() {
     // Set mounted flag
     setIsMounted(true);
     
-    // For debugging: check if the user_items table exists
-    const checkTableStructure = async () => {
-      try {
-        console.log('Checking table structure...');
-        const { data, error } = await supabase
-          .from('user_items')
-          .select('*')
-          .limit(1);
-        
-        if (error) {
-          console.error('Error checking table structure:', error);
-        } else {
-          console.log('Table exists, sample data:', data);
-        }
-      } catch (err) {
-        console.error('Failed to check table structure:', err);
+    const initializeProfile = async () => {
+      // Verify auth state first - this will refresh the token if needed
+      const isAuthenticated = await verifyAuthState();
+      
+      if (!isAuthenticated) {
+        console.log('Auth verification failed, redirecting to login');
+        router.replace('/login');
+        return;
       }
+      
+      // For debugging: check if the user_items table exists
+      checkTableStructure();
+      
+      // Load profile data with retry mechanism
+      loadProfileData();
     };
     
-    checkTableStructure();
-    
-    // Create a main loading function with timeout
-    const loadProfileData = async () => {
-      // Set a timeout for the entire loading process
-      const timeout = setTimeout(() => {
-        if (isMounted && loading) {
-          console.log('Profile data loading timed out');
-          setLoading(false);
-          setError('Loading timed out. Please try again.');
-        }
-      }, 10000); // Increased from 5000 to 10000 ms
-
-      try {
-        // Run both fetch operations in parallel
-        await Promise.all([
-          fetchProfile(),
-          fetchStats()
-        ]);
-        
-        // Only update state if component is still mounted
-        if (isMounted) {
-          setLoading(false);
-        }
-      } catch (error) {
-        console.error('Error loading profile data:', error);
-        // Only update state if component is still mounted
-        if (isMounted) {
-          setError('Failed to load profile data');
-          setLoading(false);
-        }
-      } finally {
-        clearTimeout(timeout);
-      }
-    };
-
-    loadProfileData();
+    initializeProfile();
 
     // Cleanup function to prevent state updates after unmount
     return () => {
       setIsMounted(false);
     };
   }, []);
+
+  const checkTableStructure = async () => {
+    try {
+      console.log('Checking table structure...');
+      const { data, error } = await supabase
+        .from('user_items')
+        .select('*')
+        .limit(1);
+      
+      if (error) {
+        console.error('Error checking table structure:', error);
+      } else {
+        console.log('Table exists, sample data:', data);
+      }
+    } catch (err) {
+      console.error('Failed to check table structure:', err);
+    }
+  };
+  
+  const loadProfileData = async () => {
+    // Set a timeout for the entire loading process
+    const timeout = setTimeout(() => {
+      if (isMounted && loading) {
+        console.log('Profile data loading timed out');
+        
+        if (fetchRetryCount < MAX_RETRIES) {
+          console.log(`Retrying profile data load (${fetchRetryCount + 1}/${MAX_RETRIES})`);
+          setFetchRetryCount(prev => prev + 1);
+          loadProfileData();
+        } else {
+          setLoading(false);
+          setError('Loading timed out. Please try again.');
+        }
+      }
+    }, 8000);
+
+    try {
+      // Run both fetch operations in parallel
+      await Promise.all([
+        fetchProfile(),
+        fetchStats()
+      ]);
+      
+      // Only update state if component is still mounted
+      if (isMounted) {
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('Error loading profile data:', error);
+      // Only update state if component is still mounted
+      if (isMounted) {
+        // Try one more time if we haven't reached max retries
+        if (fetchRetryCount < MAX_RETRIES) {
+          console.log(`Error occurred, retrying profile load (${fetchRetryCount + 1}/${MAX_RETRIES})`);
+          setFetchRetryCount(prev => prev + 1);
+          setTimeout(loadProfileData, 1000); // Wait 1 second before retrying
+        } else {
+          setError('Failed to load profile data');
+          setLoading(false);
+        }
+      }
+    } finally {
+      clearTimeout(timeout);
+    }
+  };
 
   async function fetchProfile() {
     try {
@@ -149,7 +179,7 @@ export default function ProfileScreen() {
         .eq('type', 'watched');
       
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Stats query timed out')), 5000)  // Increased from 3000 to 5000 ms
+        setTimeout(() => reject(new Error('Stats query timed out')), 5000)
       );
       
       const { data: watched, error } = await Promise.race([
@@ -209,11 +239,20 @@ export default function ProfileScreen() {
     }
   }
 
+  const handleRetry = () => {
+    setError(null);
+    setLoading(true);
+    setFetchRetryCount(0);
+    loadProfileData();
+  };
+
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator animating={true} size="large" color="#e21f70" />
-        <Text style={styles.loadingText}>Loading profile...</Text>
+        <Text style={styles.loadingText}>
+          {fetchRetryCount > 0 ? `Loading profile... (Attempt ${fetchRetryCount + 1})` : 'Loading profile...'}
+        </Text>
       </View>
     );
   }
@@ -224,12 +263,7 @@ export default function ProfileScreen() {
         <Text style={styles.errorText}>{error}</Text>
         <Button 
           mode="contained" 
-          onPress={() => {
-            setError(null);
-            setLoading(true);
-            fetchProfile().catch(() => setLoading(false));
-            fetchStats().catch(() => {});
-          }}
+          onPress={handleRetry}
           style={styles.retryButton}
         >
           Retry
@@ -250,7 +284,6 @@ export default function ProfileScreen() {
           <Text variant="bodyMedium" style={styles.email}>{profile?.email || ''}</Text>
           <TouchableOpacity 
             style={styles.settingsButton}
-            // Use style.pointerEvents instead of props.pointerEvents
             accessibilityRole="button"
           >
             <Settings size={24} color="#888" />
