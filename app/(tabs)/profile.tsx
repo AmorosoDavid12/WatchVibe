@@ -6,10 +6,12 @@ import {
   ScrollView,
   Image,
   Platform,
+  Modal,
+  Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase, getCurrentSession, verifyAuthState } from '@/lib/supabase';
-import { Settings, LogOut, Star } from 'lucide-react-native';
+import { Settings, LogOut, Star, Smartphone, Monitor } from 'lucide-react-native';
 import { Text, Button, Card, Avatar, ActivityIndicator, Divider, Surface } from 'react-native-paper';
 import { logout } from '@/lib/supabase';
 
@@ -38,6 +40,7 @@ export default function ProfileScreen() {
     avgRating: 0,
     watchTime: 0,
   });
+  const [logoutModalVisible, setLogoutModalVisible] = useState(false);
 
   // Use an additional state to track if the component is mounted
   const [isMounted, setIsMounted] = useState(true);
@@ -220,16 +223,17 @@ export default function ProfileScreen() {
     }
   }
 
-  async function handleSignOut() {
+  async function handleSignOut(currentDeviceOnly: boolean = false) {
     try {
       setLoading(true);
+      setLogoutModalVisible(false);
       
       // Force navigation to login page immediately, don't wait for logout to complete
       router.replace('/login');
       
       // Then perform logout in the background
       // The logout function has been improved to not get stuck and to clean up localStorage
-      await logout().catch(error => {
+      await logout(currentDeviceOnly).catch(error => {
         console.error('Error in logout (background):', error);
         // Errors are already handled in the logout function
       });
@@ -335,11 +339,62 @@ export default function ProfileScreen() {
         buttonColor="#e21f70"
         style={styles.signOutButton}
         icon={() => <LogOut size={20} color="#fff" />}
-        onPress={handleSignOut}
+        onPress={() => setLogoutModalVisible(true)}
         loading={loading}
       >
         Sign Out
       </Button>
+
+      {/* Logout Options Modal */}
+      <Modal
+        animationType="fade"
+        transparent={true}
+        visible={logoutModalVisible}
+        onRequestClose={() => setLogoutModalVisible(false)}
+      >
+        <Pressable 
+          style={styles.modalOverlay} 
+          onPress={() => setLogoutModalVisible(false)}
+        >
+          <View style={styles.modalContainer}>
+            <Text style={styles.modalTitle}>Sign Out Options</Text>
+            
+            <TouchableOpacity 
+              style={styles.modalOption}
+              onPress={() => handleSignOut(true)}
+            >
+              <Smartphone size={20} color="#fff" style={styles.modalIcon} />
+              <View style={styles.modalTextContainer}>
+                <Text style={styles.modalOptionTitle}>This Device Only</Text>
+                <Text style={styles.modalOptionDescription}>
+                  Stay logged in on other devices
+                </Text>
+              </View>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={styles.modalOption}
+              onPress={() => handleSignOut(false)}
+            >
+              <Monitor size={20} color="#fff" style={styles.modalIcon} />
+              <View style={styles.modalTextContainer}>
+                <Text style={styles.modalOptionTitle}>All Devices</Text>
+                <Text style={styles.modalOptionDescription}>
+                  Sign out from all devices
+                </Text>
+              </View>
+            </TouchableOpacity>
+            
+            <Button 
+              mode="outlined" 
+              style={styles.cancelButton}
+              onPress={() => setLogoutModalVisible(false)}
+            >
+              Cancel
+            </Button>
+          </View>
+        </Pressable>
+      </Modal>
     </ScrollView>
   );
 }
@@ -452,5 +507,53 @@ const styles = StyleSheet.create({
   },
   signOutButton: {
     margin: 16,
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalContainer: {
+    width: '80%',
+    backgroundColor: '#1a1a1a',
+    borderRadius: 8,
+    padding: 20,
+    ...getElevation(4),
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  modalOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    marginBottom: 8,
+    backgroundColor: '#252525',
+    borderRadius: 8,
+  },
+  modalIcon: {
+    marginRight: 16,
+  },
+  modalTextContainer: {
+    flex: 1,
+  },
+  modalOptionTitle: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  modalOptionDescription: {
+    color: '#aaa',
+    fontSize: 14,
+    marginTop: 4,
+  },
+  cancelButton: {
+    marginTop: 12,
+    borderColor: '#444',
   },
 });
