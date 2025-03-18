@@ -11,9 +11,12 @@
     }
   ],
   "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "/index.html"
-    }
+    { "handle": "filesystem" },
+    { "src": "/static/(.*)", "dest": "/static/$1" },
+    { "src": "/assets/(.*)", "dest": "/assets/$1" },
+    { "src": "/.*\\.js", "dest": "/$0" },
+    { "src": "/.*\\.css", "dest": "/$0" },
+    { "src": "/.*\\.(jpg|jpeg|png|gif|ico|svg|webp)", "dest": "/$0" },
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 } 
