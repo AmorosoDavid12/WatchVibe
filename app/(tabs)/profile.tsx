@@ -102,9 +102,10 @@ export default function ProfileScreen() {
       
       // Add a race with timeout to prevent hanging
       const statsPromise = supabase
-        .from('watched')
+        .from('user_items')
         .select('*')
-        .eq('user_id', session.user.id);
+        .eq('user_id', session.user.id)
+        .eq('type', 'watched');
       
       const timeoutPromise = new Promise((_, reject) => 
         setTimeout(() => reject(new Error('Stats query timed out')), 3000)
@@ -121,9 +122,18 @@ export default function ProfileScreen() {
       }
 
       if (watched && watched.length > 0) {
-        const totalWatched = watched.length;
-        const avgRating = watched.reduce((acc: number, curr: WatchedItem) => acc + (curr.rating || 0), 0) / (totalWatched || 1);
-        const watchTime = watched.reduce((acc: number, curr: WatchedItem) => acc + (curr.duration || 0), 0);
+        const parsedWatched = watched.map(item => {
+          try {
+            return JSON.parse(item.value);
+          } catch (e) {
+            console.error('Error parsing watched item:', e);
+            return null;
+          }
+        }).filter(Boolean);
+
+        const totalWatched = parsedWatched.length;
+        const avgRating = parsedWatched.reduce((acc: number, curr: WatchedItem) => acc + (curr.rating || 0), 0) / (totalWatched || 1);
+        const watchTime = parsedWatched.reduce((acc: number, curr: WatchedItem) => acc + (curr.duration || 0), 0);
 
         setStats({
           totalWatched,
