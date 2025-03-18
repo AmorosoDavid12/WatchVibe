@@ -8,7 +8,8 @@ import {
   TouchableOpacity, 
   Dimensions,
   Modal,
-  Pressable 
+  Pressable,
+  ActivityIndicator 
 } from 'react-native';
 import { useWatchedStore } from '../../lib/watchedStore';
 import { useWatchlistStore } from '../../lib/watchlistStore';
@@ -19,6 +20,15 @@ import Toast from 'react-native-toast-message';
 import { getMovieDetails, getTVDetails } from '../../lib/tmdb';
 
 const { width } = Dimensions.get('window');
+
+// Create extended interfaces for enriched items
+interface EnrichedWatchedItem extends WatchedItem {
+  detailsFetched?: boolean;
+  genreNames?: string[];
+  runtime?: number;
+  number_of_seasons?: number;
+  number_of_episodes?: number;
+}
 
 // Handler for toast notifications
 const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
@@ -32,28 +42,46 @@ const showToast = (message: string, type: 'success' | 'error' | 'info' = 'succes
 };
 
 export default function WatchedScreen() {
-  const { items, removeItem } = useWatchedStore();
+  const { items, removeItem, isLoading: storeLoading, isInitialized } = useWatchedStore();
   const { addItem: addToWatchlist } = useWatchlistStore();
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState('All');
   const [menuVisible, setMenuVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<WatchedItem | null>(null);
-  const [enrichedItems, setEnrichedItems] = useState<(WatchedItem & {
-    detailsFetched?: boolean,
-    genreNames?: string[]
-  })[]>([]);
+  const [enrichedItems, setEnrichedItems] = useState<EnrichedWatchedItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Don't try to process items until store is initialized
+    if (!isInitialized) return;
+    
     // Make a copy of items to enrich with additional details
     const itemsToEnrich = [...items].map(item => ({ ...item, detailsFetched: false }));
     setEnrichedItems(itemsToEnrich);
     setIsLoading(false);
-  }, [items]);
+  }, [items, isInitialized]);
+
+  // Get filtered items based on active filter
+  const getFilteredItems = () => {
+    if (activeFilter === 'All') return enrichedItems;
+    if (activeFilter === 'Rating') {
+      // Sort by rating if available
+      return [...enrichedItems].sort((a, b) => (b.rating || 0) - (a.rating || 0));
+    }
+    if (activeFilter === 'Recent') {
+      // Sort by watched date if available
+      return [...enrichedItems].sort((a, b) => {
+        const dateA = a.watched_date ? new Date(a.watched_date).getTime() : 0;
+        const dateB = b.watched_date ? new Date(b.watched_date).getTime() : 0;
+        return dateB - dateA;
+      });
+    }
+    return enrichedItems;
+  };
 
   // Fetch additional details for an item when needed
   const fetchItemDetails = async (item: WatchedItem, index: number) => {
-    if (enrichedItems[index].detailsFetched) return;
+    if (enrichedItems[index]?.detailsFetched) return;
 
     try {
       let details;
@@ -68,12 +96,14 @@ export default function WatchedScreen() {
 
       setEnrichedItems(current => {
         const updated = [...current];
-        updated[index] = {
-          ...current[index],
-          ...details,
-          detailsFetched: true,
-          genreNames
-        };
+        if (updated[index]) {
+          updated[index] = {
+            ...current[index],
+            ...details,
+            detailsFetched: true,
+            genreNames
+          };
+        }
         return updated;
       });
     } catch (error) {
@@ -100,7 +130,7 @@ export default function WatchedScreen() {
   };
 
   // Format duration or seasons/episodes info based on media type
-  const formatDuration = (item: WatchedItem & { detailsFetched?: boolean }) => {
+  const formatDuration = (item: EnrichedWatchedItem) => {
     if (!item.detailsFetched) return 'Loading...';
 
     if (item.media_type === 'movie' && item.runtime) {
@@ -114,12 +144,12 @@ export default function WatchedScreen() {
   };
 
   // Format genres as a comma-separated string
-  const formatGenres = (item: WatchedItem & { genreNames?: string[] }) => {
+  const formatGenres = (item: EnrichedWatchedItem) => {
     if (!item.detailsFetched) return '';
     return (item.genreNames || []).slice(0, 2).join(', ');
   };
 
-  const renderItem = ({ item, index }: { item: WatchedItem & { detailsFetched?: boolean, genreNames?: string[] }, index: number }) => {
+  const renderItem = ({ item, index }: { item: EnrichedWatchedItem, index: number }) => {
     // Fetch details when rendering if not already fetched
     if (!item.detailsFetched) {
       fetchItemDetails(item, index);
@@ -177,6 +207,16 @@ export default function WatchedScreen() {
     );
   };
 
+  // Show loading indicator while initializing
+  if (storeLoading || isLoading || !isInitialized) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#8c52ff" />
+        <Text style={styles.loadingText}>Loading watched items...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Watched</Text>
@@ -212,15 +252,28 @@ export default function WatchedScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Empty state or filtered list */}
       {items.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>
             You haven't watched any movies or TV shows yet.
           </Text>
+          <TouchableOpacity
+            style={styles.emptyStateButton}
+            onPress={() => router.push('/search')}
+          >
+            <Text style={styles.emptyStateButtonText}>Find Content</Text>
+          </TouchableOpacity>
+        </View>
+      ) : getFilteredItems().length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>
+            No {activeFilter !== 'All' ? activeFilter : 'items'} found in your watched list.
+          </Text>
         </View>
       ) : (
         <FlatList
-          data={enrichedItems}
+          data={getFilteredItems()}
           renderItem={renderItem}
           keyExtractor={(item) => `${item.media_type}-${item.id}`}
           contentContainerStyle={styles.list}
@@ -252,7 +305,7 @@ export default function WatchedScreen() {
               style={styles.menuItem}
               onPress={() => selectedItem && handleRemove(selectedItem)}
             >
-              <Text style={styles.menuTextDanger}>Remove from watched list</Text>
+              <Text style={styles.menuTextDanger}>Remove from Watched</Text>
             </TouchableOpacity>
           </View>
         </Pressable>
@@ -267,11 +320,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#121212',
     padding: 16,
   },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 16,
+    fontSize: 16,
+  },
   title: {
     fontSize: 32,
     fontWeight: 'bold',
     color: '#8c52ff',
-    marginBottom: 16,
+    marginBottom: 24,
   },
   filterContainer: {
     flexDirection: 'row',
@@ -392,5 +454,16 @@ const styles = StyleSheet.create({
   menuDivider: {
     height: 1,
     backgroundColor: '#333',
+  },
+  emptyStateButton: {
+    marginTop: 16,
+    backgroundColor: '#8c52ff',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  emptyStateButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
 });

@@ -26,6 +26,7 @@ export default function RootLayout() {
   const { authInitialized } = useAuth();
   const [forceLoaded, setForceLoaded] = useState(false);
   const [dataInitialized, setDataInitialized] = useState(false);
+  const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   
   // Get store actions
   const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
@@ -47,6 +48,19 @@ export default function RootLayout() {
     return () => clearTimeout(timeout);
   }, [authInitialized]);
 
+  // Force complete the loading after a reasonable timeout
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (!initialLoadComplete) {
+        console.log('Safety timeout triggered - forcing data initialization complete');
+        setDataInitialized(true);
+        setInitialLoadComplete(true);
+      }
+    }, 5000); // 5 second safety timeout
+    
+    return () => clearTimeout(timeout);
+  }, [initialLoadComplete]);
+
   // Initialize data stores once auth is initialized
   useEffect(() => {
     if (authInitialized || forceLoaded) {
@@ -64,6 +78,7 @@ export default function RootLayout() {
           console.error('Failed to initialize data stores:', error);
         } finally {
           setDataInitialized(true);
+          setInitialLoadComplete(true);
         }
       };
       
@@ -71,10 +86,13 @@ export default function RootLayout() {
     }
   }, [authInitialized, forceLoaded]);
   
-  // Track if all initialization is complete
-  const isLoading = (!authInitialized && !forceLoaded) || 
-                    (watchlistLoading || watchedLoading) ||
-                    (!watchlistInitialized || !watchedInitialized) && !dataInitialized;
+  // Only show the loading screen on initial load, not when switching pages
+  // Once initialLoadComplete is true, we never show the loading screen again
+  const isLoading = !initialLoadComplete && (
+    (!authInitialized && !forceLoaded) || 
+    (watchlistLoading && watchedLoading) ||
+    (!watchlistInitialized && !watchedInitialized && !dataInitialized)
+  );
 
   if (isLoading) {
     return (

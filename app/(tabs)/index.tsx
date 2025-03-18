@@ -18,6 +18,15 @@ import { Plus, MoreVertical, Star, Film, Tv } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { getMovieDetails, getTVDetails } from '../../lib/tmdb';
 
+// Create extended interfaces for enriched items
+interface EnrichedItem extends WatchlistItem {
+  detailsFetched?: boolean;
+  genreNames?: string[];
+  runtime?: number;
+  number_of_seasons?: number;
+  number_of_episodes?: number;
+}
+
 // Handler for toast notifications
 const showToast = (message: string, type: 'success' | 'error' | 'info' = 'success') => {
   Toast.show({
@@ -36,10 +45,7 @@ export default function WatchlistScreen() {
   const [activeFilter, setActiveFilter] = useState('All');
   const [menuVisible, setMenuVisible] = useState(false);
   const [selectedItem, setSelectedItem] = useState<WatchlistItem | null>(null);
-  const [enrichedItems, setEnrichedItems] = useState<(WatchlistItem & {
-    detailsFetched?: boolean,
-    genreNames?: string[]
-  })[]>([]);
+  const [enrichedItems, setEnrichedItems] = useState<EnrichedItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
@@ -62,7 +68,7 @@ export default function WatchlistScreen() {
 
   // Fetch additional details for an item when needed
   const fetchItemDetails = async (item: WatchlistItem, index: number) => {
-    if (enrichedItems[index].detailsFetched) return;
+    if (enrichedItems[index]?.detailsFetched) return;
 
     try {
       let details;
@@ -77,12 +83,14 @@ export default function WatchlistScreen() {
 
       setEnrichedItems(current => {
         const updated = [...current];
-        updated[index] = {
-          ...current[index],
-          ...details,
-          detailsFetched: true,
-          genreNames
-        };
+        if (updated[index]) {
+          updated[index] = {
+            ...current[index],
+            ...details,
+            detailsFetched: true,
+            genreNames
+          };
+        }
         return updated;
       });
     } catch (error) {
@@ -113,7 +121,7 @@ export default function WatchlistScreen() {
   };
 
   // Format duration or seasons/episodes info based on media type
-  const formatDuration = (item: WatchlistItem & { detailsFetched?: boolean }) => {
+  const formatDuration = (item: EnrichedItem) => {
     if (!item.detailsFetched) return 'Loading...';
 
     if (item.media_type === 'movie' && item.runtime) {
@@ -127,12 +135,12 @@ export default function WatchlistScreen() {
   };
 
   // Format genres as a comma-separated string
-  const formatGenres = (item: WatchlistItem & { genreNames?: string[] }) => {
+  const formatGenres = (item: EnrichedItem) => {
     if (!item.detailsFetched) return '';
     return (item.genreNames || []).slice(0, 2).join(', ');
   };
 
-  const renderItem = ({ item, index }: { item: WatchlistItem & { detailsFetched?: boolean, genreNames?: string[] }, index: number }) => {
+  const renderItem = ({ item, index }: { item: EnrichedItem, index: number }) => {
     // Fetch details when rendering if not already fetched
     if (!item.detailsFetched) {
       fetchItemDetails(item, index);
