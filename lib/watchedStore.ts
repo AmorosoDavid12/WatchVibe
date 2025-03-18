@@ -15,6 +15,8 @@ export interface WatchedItem {
 
 interface WatchedState {
   items: WatchedItem[];
+  isLoading: boolean;
+  isInitialized: boolean;
   addItem: (item: WatchedItem) => boolean;
   removeItem: (id: number) => void;
   reorderItems: (items: WatchedItem[]) => void;
@@ -29,6 +31,8 @@ export const useWatchedStore = create<WatchedState>()(
   persist(
     (set, get) => ({
       items: [],
+      isLoading: false,
+      isInitialized: false,
       addItem: (item: WatchedItem) => {
         // First update local state immediately for UI responsiveness
         const exists = get().hasItem(item.id);
@@ -140,10 +144,14 @@ export const useWatchedStore = create<WatchedState>()(
       },
       syncWithSupabase: async () => {
         try {
+          // Set loading state to true at the beginning of sync
+          set({ isLoading: true });
+          
           // Check for an authenticated session
           const session = await getCurrentSession();
           if (!session?.user) {
             console.log('No authenticated user found, skipping Supabase sync');
+            set({ isLoading: false, isInitialized: true });
             return false;
           }
 
@@ -172,11 +180,13 @@ export const useWatchedStore = create<WatchedState>()(
           
           if (error) {
             console.error('Error fetching watched items:', error);
+            set({ isLoading: false, isInitialized: true });
             return false;
           }
           
           if (!data || data.length === 0) {
             console.log('No watched data received');
+            set({ isLoading: false, isInitialized: true });
             return true; // No data is not an error
           }
 
@@ -192,11 +202,14 @@ export const useWatchedStore = create<WatchedState>()(
             }
           }).filter(Boolean); // Remove null items
           
-          set({ items });
+          // Set the loading state to false and update items
+          set({ items, isLoading: false, isInitialized: true });
           
           return true;
         } catch (error) {
           console.error('Error syncing watched list:', error);
+          // Make sure to set loading to false even in error cases
+          set({ isLoading: false, isInitialized: true });
           return false;
         }
       }

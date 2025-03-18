@@ -13,6 +13,8 @@ export interface WatchlistItem {
 
 interface WatchlistState {
   items: WatchlistItem[];
+  isLoading: boolean;
+  isInitialized: boolean;
   addItem: (item: WatchlistItem) => boolean;
   removeItem: (id: number) => void;
   reorderItems: (items: WatchlistItem[]) => void;
@@ -27,6 +29,8 @@ export const useWatchlistStore = create<WatchlistState>()(
   persist(
     (set, get) => ({
       items: [],
+      isLoading: false,
+      isInitialized: false,
       addItem: (item: WatchlistItem) => {
         // First update local state immediately for UI responsiveness
         const exists = get().hasItem(item.id);
@@ -138,10 +142,14 @@ export const useWatchlistStore = create<WatchlistState>()(
       },
       syncWithSupabase: async () => {
         try {
+          // Set loading state to true at the beginning of sync
+          set({ isLoading: true });
+          
           // Check for an authenticated session
           const session = await getCurrentSession();
           if (!session?.user) {
             console.log('No authenticated user found, skipping Supabase sync');
+            set({ isLoading: false, isInitialized: true });
             return false;
           }
 
@@ -170,11 +178,13 @@ export const useWatchlistStore = create<WatchlistState>()(
           
           if (error) {
             console.error('Error fetching watchlist items:', error);
+            set({ isLoading: false, isInitialized: true });
             return false;
           }
           
           if (!data || data.length === 0) {
             console.log('No watchlist data received');
+            set({ isLoading: false, isInitialized: true });
             return true; // No data is not an error
           }
 
@@ -190,11 +200,14 @@ export const useWatchlistStore = create<WatchlistState>()(
             }
           }).filter(Boolean); // Remove null items
           
-          set({ items });
+          // Set the loading state to false and update items
+          set({ items, isLoading: false, isInitialized: true });
           
           return true;
         } catch (error) {
           console.error('Error syncing watchlist:', error);
+          // Make sure to set loading to false even in error cases
+          set({ isLoading: false, isInitialized: true });
           return false;
         }
       }

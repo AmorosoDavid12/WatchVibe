@@ -7,7 +7,8 @@ import {
   Image, 
   TouchableOpacity, 
   Modal,
-  Pressable
+  Pressable,
+  ActivityIndicator
 } from 'react-native';
 import { useWatchlistStore } from '../../lib/watchlistStore';
 import { useWatchedStore } from '../../lib/watchedStore';
@@ -29,7 +30,7 @@ const showToast = (message: string, type: 'success' | 'error' | 'info' = 'succes
 };
 
 export default function WatchlistScreen() {
-  const { items, removeItem } = useWatchlistStore();
+  const { items, removeItem, isLoading: storeLoading, isInitialized } = useWatchlistStore();
   const { addItem: addToWatched } = useWatchedStore();
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState('All');
@@ -42,11 +43,22 @@ export default function WatchlistScreen() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    // Don't try to process items until store is initialized
+    if (!isInitialized) return;
+    
     // Make a copy of items to enrich with additional details
     const itemsToEnrich = [...items].map(item => ({ ...item, detailsFetched: false }));
     setEnrichedItems(itemsToEnrich);
     setIsLoading(false);
-  }, [items]);
+  }, [items, isInitialized]);
+
+  // Get filtered items based on active filter
+  const getFilteredItems = () => {
+    if (activeFilter === 'All') return enrichedItems;
+    if (activeFilter === 'Movies') return enrichedItems.filter(item => item.media_type === 'movie');
+    if (activeFilter === 'TV Shows') return enrichedItems.filter(item => item.media_type === 'tv');
+    return enrichedItems;
+  };
 
   // Fetch additional details for an item when needed
   const fetchItemDetails = async (item: WatchlistItem, index: number) => {
@@ -181,6 +193,16 @@ export default function WatchlistScreen() {
     );
   };
 
+  // Show loading indicator while initializing
+  if (storeLoading || isLoading || !isInitialized) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#e21f70" />
+        <Text style={styles.loadingText}>Loading watchlist...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       <View style={styles.header}>
@@ -224,15 +246,28 @@ export default function WatchlistScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Empty state or filtered list */}
       {items.length === 0 ? (
         <View style={styles.emptyState}>
           <Text style={styles.emptyStateText}>
             Your watchlist is empty. Add some movies or TV shows!
           </Text>
+          <TouchableOpacity
+            style={styles.emptyStateButton}
+            onPress={navigateToSearch}
+          >
+            <Text style={styles.emptyStateButtonText}>Browse Content</Text>
+          </TouchableOpacity>
+        </View>
+      ) : getFilteredItems().length === 0 ? (
+        <View style={styles.emptyState}>
+          <Text style={styles.emptyStateText}>
+            No {activeFilter !== 'All' ? activeFilter : 'items'} in your watchlist.
+          </Text>
         </View>
       ) : (
         <FlatList
-          data={enrichedItems}
+          data={getFilteredItems()}
           renderItem={renderItem}
           keyExtractor={(item) => `${item.media_type}-${item.id}`}
           contentContainerStyle={styles.list}
@@ -416,5 +451,25 @@ const styles = StyleSheet.create({
   menuDivider: {
     height: 1,
     backgroundColor: '#333',
+  },
+  centerContent: {
+    justifyContent: 'center', 
+    alignItems: 'center'
+  },
+  loadingText: {
+    color: '#fff',
+    marginTop: 16,
+    fontSize: 16,
+  },
+  emptyStateButton: {
+    marginTop: 16,
+    backgroundColor: '#e21f70',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 8,
+  },
+  emptyStateButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
   },
 });

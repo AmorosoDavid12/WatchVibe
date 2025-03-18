@@ -6,6 +6,8 @@ import useAuth from '@/hooks/useAuth';
 import { View, Text, ActivityIndicator } from 'react-native';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import Toast from 'react-native-toast-message';
+import { useWatchlistStore } from '@/lib/watchlistStore';
+import { useWatchedStore } from '@/lib/watchedStore';
 
 // Create custom theme based on dark theme
 const theme = {
@@ -23,6 +25,15 @@ export default function RootLayout() {
   useFrameworkReady();
   const { authInitialized } = useAuth();
   const [forceLoaded, setForceLoaded] = useState(false);
+  const [dataInitialized, setDataInitialized] = useState(false);
+  
+  // Get store actions
+  const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
+  const syncWatched = useWatchedStore(state => state.syncWithSupabase);
+  const watchlistLoading = useWatchlistStore(state => state.isLoading);
+  const watchedLoading = useWatchedStore(state => state.isLoading);
+  const watchlistInitialized = useWatchlistStore(state => state.isInitialized);
+  const watchedInitialized = useWatchedStore(state => state.isInitialized);
   
   // Safety timeout to prevent getting stuck on the loading screen
   useEffect(() => {
@@ -36,7 +47,36 @@ export default function RootLayout() {
     return () => clearTimeout(timeout);
   }, [authInitialized]);
 
-  if (!authInitialized && !forceLoaded) {
+  // Initialize data stores once auth is initialized
+  useEffect(() => {
+    if (authInitialized || forceLoaded) {
+      // Start parallel sync operations
+      const initializeData = async () => {
+        try {
+          console.log('Initializing data stores...');
+          // Run both syncs in parallel
+          await Promise.all([
+            syncWatchlist(),
+            syncWatched()
+          ]);
+          console.log('Data stores initialized successfully');
+        } catch (error) {
+          console.error('Failed to initialize data stores:', error);
+        } finally {
+          setDataInitialized(true);
+        }
+      };
+      
+      initializeData();
+    }
+  }, [authInitialized, forceLoaded]);
+  
+  // Track if all initialization is complete
+  const isLoading = (!authInitialized && !forceLoaded) || 
+                    (watchlistLoading || watchedLoading) ||
+                    (!watchlistInitialized || !watchedInitialized) && !dataInitialized;
+
+  if (isLoading) {
     return (
       <PaperProvider theme={theme}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' }}>
