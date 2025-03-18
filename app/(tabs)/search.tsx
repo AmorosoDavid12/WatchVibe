@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   Dimensions,
   ScrollView,
   StatusBar,
+  Animated,
 } from 'react-native';
 import { useWatchlistStore } from '../../lib/watchlistStore';
 import { searchContent, formatSearchResult, TMDbSearchResult, getTrending, getMovieDetails } from '../../lib/tmdb';
@@ -49,6 +50,11 @@ export default function SearchScreen() {
   const [loading, setLoading] = useState(false);
   const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Animation values for button transitions
+  const spotlightButtonScale = useRef(new Animated.Value(1)).current;
+  const spotlightButtonColor = useRef(new Animated.Value(0)).current;
+  const spotlightButtonRotation = useRef(new Animated.Value(0)).current;
   
   const { addItem: addToWatchlist, hasItem: isInWatchlist } = useWatchlistStore();
   const { hasItem: isInWatched, removeItem: removeFromWatched } = useWatchedStore();
@@ -139,17 +145,60 @@ export default function SearchScreen() {
     [selectedCategory]
   );
 
-  const handleAddToWatchlist = (result: TMDbSearchResult) => {
-    const formattedResult = formatSearchResult(result);
+  const handleButtonAnimation = (item: TMDbSearchResult, inWatchlist: boolean) => {
+    // Perform add to watchlist operation
+    const formattedResult = formatSearchResult(item);
     if (formattedResult) {
       const title = formattedResult.title;
       const added = addToWatchlist(formattedResult);
+      
+      // Animate button if successfully added
       if (added) {
         console.log(`Added to watchlist: ${title}`);
         showToast(`"${title}" added to watchlist`, 'success');
+        
+        // For spotlight button, perform animations
+        if (item.id === spotlightItem?.id) {
+          Animated.parallel([
+            Animated.sequence([
+              Animated.timing(spotlightButtonScale, {
+                toValue: 0.9,
+                duration: 100,
+                useNativeDriver: false, // Set to false for web compatibility
+              }),
+              Animated.timing(spotlightButtonScale, {
+                toValue: 1.05,
+                duration: 100,
+                useNativeDriver: false,
+              }),
+              Animated.timing(spotlightButtonScale, {
+                toValue: 1,
+                duration: 100,
+                useNativeDriver: false,
+              }),
+            ]),
+            Animated.timing(spotlightButtonColor, {
+              toValue: 1,
+              duration: 300,
+              useNativeDriver: false,
+            }),
+            Animated.timing(spotlightButtonRotation, {
+              toValue: 1,
+              duration: 300,
+              useNativeDriver: false,
+            }),
+          ]).start();
+        }
       } else {
         showToast(`"${title}" is already in your watchlist`, 'info');
       }
+    }
+  };
+
+  const handleAddToWatchlist = (result: TMDbSearchResult) => {
+    const inWatchlist = isInWatchlist(result.id);
+    if (!inWatchlist) {
+      handleButtonAnimation(result, false);
     }
   };
 
@@ -243,24 +292,25 @@ export default function SearchScreen() {
           )}
         </View>
         
-        {/* Action buttons - three states: Add to watchlist, Already added, or Rewatch */}
+        {/* Action buttons with animated transition */}
         {inWatchlist ? (
-          <View style={styles.addedButton}>
-            <Check size={20} color="#4CAF50" />
+          <View style={[styles.actionButton, styles.addedButton]}>
+            <Check size={20} color="#2ecc71" />
           </View>
         ) : inWatched ? (
           <TouchableOpacity
-            style={styles.rewatchButton}
+            style={[styles.actionButton, styles.rewatchButton]}
             onPress={() => handleRewatchItem(item)}
           >
             <Repeat size={20} color="#2196F3" />
           </TouchableOpacity>
         ) : (
           <TouchableOpacity
-            style={styles.addButton}
+            style={[styles.actionButton, styles.addButton]}
             onPress={() => handleAddToWatchlist(item)}
+            activeOpacity={0.7}
           >
-            <Plus size={20} color="#4CAF50" />
+            <Plus size={20} color="#3498db" />
           </TouchableOpacity>
         )}
       </TouchableOpacity>
@@ -342,6 +392,20 @@ export default function SearchScreen() {
   const renderSpotlight = () => {
     if (!spotlightItem) return null;
     
+    const inWatchlist = isInWatchlist(spotlightItem.id);
+    
+    // Interpolate colors for spotlight button
+    const buttonBackgroundColor = spotlightButtonColor.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['#3498db', '#2ecc71']
+    });
+    
+    // Interpolate rotation for icon transition
+    const iconRotation = spotlightButtonRotation.interpolate({
+      inputRange: [0, 1],
+      outputRange: ['0deg', '180deg']
+    });
+    
     return (
       <TouchableOpacity 
         style={styles.spotlightContainer}
@@ -386,13 +450,34 @@ export default function SearchScreen() {
           <Text style={styles.spotlightOverview} numberOfLines={2}>
             {spotlightItem.overview}
           </Text>
-          <TouchableOpacity 
-            style={styles.spotlightButton}
-            onPress={() => handleAddToWatchlist(spotlightItem)}
+          
+          <Animated.View
+            style={[
+              styles.spotlightButton,
+              {
+                backgroundColor: inWatchlist ? '#2ecc71' : buttonBackgroundColor,
+                transform: [{ scale: spotlightButtonScale }]
+              }
+            ]}
           >
-            <Plus size={18} color="#fff" style={styles.spotlightButtonIcon} />
-            <Text style={styles.spotlightButtonText}>Add to Watchlist</Text>
-          </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.spotlightButtonContent}
+              onPress={() => handleAddToWatchlist(spotlightItem)}
+              activeOpacity={0.8}
+              disabled={inWatchlist}
+            >
+              <Animated.View style={{ transform: [{ rotate: inWatchlist ? '180deg' : iconRotation }] }}>
+                {inWatchlist ? (
+                  <Check size={18} color="#fff" />
+                ) : (
+                  <Plus size={18} color="#fff" />
+                )}
+              </Animated.View>
+              <Text style={styles.spotlightButtonText}>
+                {inWatchlist ? 'Added to Watchlist' : 'Add to Watchlist'}
+              </Text>
+            </TouchableOpacity>
+          </Animated.View>
         </View>
       </TouchableOpacity>
     );
@@ -450,18 +535,21 @@ export default function SearchScreen() {
       {isSearchActive ? (
         renderSearchResults()
       ) : (
-        <ScrollView showsVerticalScrollIndicator={false}>
-          {/* Spotlight section */}
-          {renderSpotlight()}
-          
-          {/* Trending section */}
-          {renderHorizontalList('Trending Now', trendingItems)}
-          
-          {/* For You section */}
-          {renderHorizontalList('For You', recommendedItems)}
-          
-          {/* New Releases section */}
-          {renderHorizontalList('New Releases', newReleases)}
+        <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+          {/* Content container with padding to prevent overlap */}
+          <View style={styles.contentContainer}>
+            {/* Spotlight section */}
+            {renderSpotlight()}
+            
+            {/* Trending section */}
+            {renderHorizontalList('Trending Now', trendingItems)}
+            
+            {/* For You section */}
+            {renderHorizontalList('For You', recommendedItems)}
+            
+            {/* New Releases section */}
+            {renderHorizontalList('New Releases', newReleases)}
+          </View>
         </ScrollView>
       )}
       
@@ -499,19 +587,28 @@ const styles = StyleSheet.create({
     fontSize: 16,
     height: 48,
   },
+  scrollContainer: {
+    flex: 1,
+  },
+  contentContainer: {
+    paddingTop: 8,
+    paddingBottom: 24,
+  },
   categoriesContainer: {
     paddingHorizontal: 12,
     paddingVertical: 12,
+    marginBottom: 8,
+    zIndex: 2,
   },
   categoryButton: {
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
     marginHorizontal: 4,
-    backgroundColor: 'transparent',
+    backgroundColor: '#1E1E1E',
   },
   categoryButtonActive: {
-    backgroundColor: '#1E1E1E',
+    backgroundColor: '#3498db',
   },
   categoryText: {
     color: '#999',
@@ -528,10 +625,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     position: 'relative',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 12,
+    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
     elevation: 8,
   },
   spotlightImage: {
@@ -554,7 +648,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 16,
-    paddingTop: 30,
+    paddingTop: 60,
   },
   spotlightTitle: {
     color: '#fff',
@@ -600,12 +694,16 @@ const styles = StyleSheet.create({
   spotlightButton: {
     backgroundColor: '#3498db',
     borderRadius: 22,
-    paddingVertical: 10,
-    paddingHorizontal: 16,
     alignSelf: 'flex-start',
+    height: 44,
+    elevation: 3,
+  },
+  spotlightButtonContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    height: 44,
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    height: '100%',
   },
   spotlightButtonIcon: {
     marginRight: 6,
@@ -614,6 +712,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
     fontSize: 15,
+    marginLeft: 6,
   },
   sectionContainer: {
     marginBottom: 24,
@@ -632,7 +731,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   seeAllText: {
-    color: '#4CAF50',
+    color: '#3498db',
     fontSize: 14,
   },
   horizontalList: {
@@ -689,32 +788,30 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  addButton: {
+  actionButton: {
     position: 'absolute',
     top: 8,
     right: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 12,
-    padding: 4,
+    borderRadius: 20,
+    width: 32,
+    height: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     zIndex: 1,
+    elevation: 2,
+  },
+  addButton: {
+    borderWidth: 1.5,
+    borderColor: '#3498db',
   },
   addedButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 12,
-    padding: 4,
-    zIndex: 1,
+    borderWidth: 1.5,
+    borderColor: '#2ecc71',
   },
   rewatchButton: {
-    position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    borderRadius: 12,
-    padding: 4,
-    zIndex: 1,
+    borderWidth: 1.5,
+    borderColor: '#2196F3',
   },
   grid: {
     paddingHorizontal: 16,
