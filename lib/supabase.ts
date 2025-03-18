@@ -151,20 +151,21 @@ const EnhancedStorageAdapter = {
 
 // Create Supabase client with enhanced options
 export const supabase = createClient(
-  constants.SUPABASE_URL, 
-  constants.SUPABASE_ANON_KEY, 
+  constants.SUPABASE_URL,
+  constants.SUPABASE_ANON_KEY,
   {
     auth: {
       storage: EnhancedStorageAdapter as any,
       autoRefreshToken: true,
       persistSession: true,
-      detectSessionInUrl: true,
+      detectSessionInUrl: false,
+      flowType: 'pkce',
     },
     // Add global fetch parameters to help with CORS and auth
     global: {
       fetch: async (...args: any[]) => {
         const [url, options = {}] = args;
-        
+
         // Get the current session access token if available
         let accessToken = constants.SUPABASE_ANON_KEY;
         try {
@@ -178,7 +179,7 @@ export const supabase = createClient(
         } catch (error) {
           console.error('Error getting session for request:', error);
         }
-        
+
         // Ensure API key and auth token are included for all API calls
         const fetchOptions = {
           ...options,
@@ -191,7 +192,7 @@ export const supabase = createClient(
             'Authorization': `Bearer ${accessToken}`
           },
         };
-        
+
         return fetch(url, fetchOptions);
       }
     }
@@ -257,52 +258,31 @@ export async function login(email: string, password: string) {
   }
 }
 
-export async function logout() {
-  console.log('Logging out...');
+/**
+ * Logs the user out by clearing their session
+ * @param currentDeviceOnly If true, only signs out from the current device. Default is false (all devices).
+ */
+export const logout = async (currentDeviceOnly: boolean = false): Promise<void> => {
   try {
-    // Mark that we're in the middle of logging out to prevent navigation loops
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('loggingOut', 'true');
-    }
+    console.log('Logging out user...');
     
-    // Clear any cached session
+    // Clear cached session first for immediate UI response
     SessionManager.getInstance().clearSession();
     
-    // Clear localStorage directly first to ensure client state is cleared immediately
-    clearAuthTokens();
+    // Sign out with the specified scope
+    const scope = currentDeviceOnly ? 'local' : 'global';
+    await supabase.auth.signOut({ scope });
     
-    // Set a timeout to ensure we don't hang
-    const timeoutPromise = new Promise((resolve) => 
-      setTimeout(() => {
-        console.log('Logout API call timed out, continuing anyway');
-        return resolve({ error: null }); // Return success even on timeout
-      }, 2000)
-    );
+    console.log(`User signed out successfully (scope: ${scope})`);
     
-    // Attempt to clear session on server, but don't wait if it takes too long
-    const signOutPromise = supabase.auth.signOut();
-    
-    // Use race to avoid hanging
-    const result = await Promise.race([signOutPromise, timeoutPromise]);
-    
-    // Clear the logout in progress marker
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('loggingOut');
-    }
-    
-    return result;
+    // Clean up any lingering data
+    return Promise.resolve();
   } catch (error) {
     console.error('Error in logout:', error);
-    
-    // Clear the logout in progress marker
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('loggingOut');
-    }
-    
-    // Return success even if there's an error
-    return { error: null };
+    // Even if there's an error, we want to clear the UI state
+    return Promise.resolve();
   }
-}
+};
 
 export async function register(email: string, password: string) {
   console.log(`Registering user ${email}...`);
@@ -321,32 +301,36 @@ export const signUpWithEmail = register;
 
 export async function resetPassword(email: string) {
   try {
-    // Sign out first to clear any existing session
-    await supabase.auth.signOut();
-    
+    // Sign out from current device only, so users can stay logged in on other devices
+    await supabase.auth.signOut({
+      scope: 'local'
+    });
+
     // Clear any cached session
     SessionManager.getInstance().clearSession();
-    
+
     console.log("Reset password for email:", email);
-    
+
     // Use a two-step approach with a special route that will handle the token without auto-login
+
     // First, redirect to our auth/password-reset-handler, which then redirects to reset-password
-    const redirectUrl = typeof window !== 'undefined' 
+
+    const redirectUrl = typeof window !== 'undefined'
       ? `${window.location.origin}/auth/password-reset-handler`
       : 'http://localhost:8081/auth/password-reset-handler';
-    
+
     console.log("Using redirect URL:", redirectUrl);
-    
+
     // Send the reset password email
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: redirectUrl
     });
-    
+
     if (error) {
       console.error("Reset password error:", error);
       throw error;
     }
-    
+
     return { error: null };
   } catch (error) {
     console.error("Reset password exception:", error);
