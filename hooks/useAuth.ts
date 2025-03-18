@@ -31,15 +31,25 @@ export default function useAuth() {
   const syncAllData = async () => {
     try {
       console.log('Starting data synchronization');
-      await Promise.all([
-        syncWatchlist(),
-        syncWatched()
+      // Create a promise that rejects after a timeout to avoid getting stuck
+      const timeoutPromise = new Promise((_, reject) => {
+        setTimeout(() => reject(new Error('Data sync timeout')), 5000);
+      });
+      
+      // Race the actual sync with the timeout
+      await Promise.race([
+        Promise.all([
+          syncWatchlist(),
+          syncWatched()
+        ]),
+        timeoutPromise
       ]);
       console.log('Data synchronization completed');
       return true;
     } catch (error) {
       console.error('Error syncing data:', error);
-      return false;
+      // Return true to avoid blocking the UI
+      return true;
     }
   };
 
@@ -61,6 +71,7 @@ export default function useAuth() {
     
     // Check if we're coming from a password reset link
     const checkForPasswordRecovery = () => {
+      console.log('Checking for password reset flow');
       // Check URL hash for recovery token
       const hash = window.location.hash.substring(1);
       const urlParams = new URLSearchParams(window.location.search);
@@ -68,6 +79,8 @@ export default function useAuth() {
       // Recovery tokens can be in the hash fragment or search params
       const isRecoveryInHash = hash && (hash.includes('type=recovery') || hash.includes('access_token'));
       const isRecoveryInSearch = urlParams.get('type') === 'recovery';
+      
+      console.log('Login params - source:', urlParams.get('source'), 'email:', urlParams.get('email'));
       
       if (isRecoveryInHash || isRecoveryInSearch) {
         console.log('Recovery parameters detected in URL');
@@ -122,6 +135,15 @@ export default function useAuth() {
   useEffect(() => {
     let isComponentMounted = true;
     
+    // Safety timeout to prevent getting stuck in the loading state
+    const safetyTimeout = setTimeout(() => {
+      if (isComponentMounted && isLoading) {
+        console.log('Safety timeout triggered - forcing auth initialization');
+        setAuthInitialized(true);
+        setIsLoading(false);
+      }
+    }, 5000);
+    
     // Get initial session without immediate navigation
     const getInitialSession = async () => {
       try {
@@ -146,7 +168,10 @@ export default function useAuth() {
           // If logged in and not in recovery, sync data
           if (isLoggedInState) {
             try {
-              await syncAllData();
+              // Don't await here - prevent blocking the auth flow
+              syncAllData().catch(error => {
+                console.error('Background sync error:', error);
+              });
             } catch (syncError) {
               console.error('Error during initial data sync:', syncError);
               // Continue even if sync fails
@@ -227,16 +252,21 @@ export default function useAuth() {
         
         // For non-recovery sessions, update logged in state and sync data
         const isAuthenticated = !!session;
-        setIsLoggedIn(isAuthenticated);
-
+        
         // Get recovery session status
         const isRecoverySession = typeof window !== 'undefined' && 
                                 localStorage.getItem('isRecoverySession') === 'true';
 
+        // Update login state based on session and recovery status
+        setIsLoggedIn(isAuthenticated && !isRecoverySession);
+
         // If user just logged in and it's not a recovery session, sync data
         if (isAuthenticated && !isRecoverySession) {
           try {
-            await syncAllData();
+            // Don't await here - sync in the background
+            syncAllData().catch(error => {
+              console.error('Background sync error:', error);
+            });
           } catch (syncError) {
             console.error('Error during auth change data sync:', syncError);
             // Continue even if sync fails
@@ -268,6 +298,7 @@ export default function useAuth() {
 
     return () => {
       isComponentMounted = false;
+      clearTimeout(safetyTimeout);
       subscription.unsubscribe();
     };
   }, [isRouterReady, router, segments, syncWatchlist, syncWatched]);

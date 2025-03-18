@@ -1,9 +1,9 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { useFrameworkReady } from '@/hooks/useFrameworkReady';
 import useAuth from '@/hooks/useAuth';
-import { View, Text } from 'react-native';
+import { View, Text, ActivityIndicator } from 'react-native';
 import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import Toast from 'react-native-toast-message';
 
@@ -22,12 +22,26 @@ const theme = {
 export default function RootLayout() {
   useFrameworkReady();
   const { authInitialized } = useAuth();
+  const [forceLoaded, setForceLoaded] = useState(false);
+  
+  // Safety timeout to prevent getting stuck on the loading screen
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      if (!authInitialized) {
+        console.log('Root layout safety timeout triggered - forcing navigation');
+        setForceLoaded(true);
+      }
+    }, 3000);
+    
+    return () => clearTimeout(timeout);
+  }, [authInitialized]);
 
-  if (!authInitialized) {
+  if (!authInitialized && !forceLoaded) {
     return (
       <PaperProvider theme={theme}>
         <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#121212' }}>
-          <Text style={{ color: '#fff' }}>Loading...</Text>
+          <ActivityIndicator size="large" color="#e21f70" />
+          <Text style={{ color: '#fff', marginTop: 20 }}>Loading...</Text>
         </View>
       </PaperProvider>
     );
