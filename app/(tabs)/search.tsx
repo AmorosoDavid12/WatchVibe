@@ -12,6 +12,7 @@ import {
   ScrollView,
   StatusBar,
   Animated,
+  Platform,
 } from 'react-native';
 import { useWatchlistStore } from '../../lib/watchlistStore';
 import { searchContent, formatSearchResult, TMDbSearchResult, getTrending, getMovieDetails } from '../../lib/tmdb';
@@ -37,6 +38,18 @@ const showToast = (message: string, type: 'success' | 'error' | 'info' = 'succes
 };
 
 type CategoryType = 'all' | 'movies' | 'tv' | 'anime' | 'documentaries';
+
+// Platform-specific elevation styles to handle web vs native differences
+const getElevation = (value: number) => {
+  if (Platform.OS === 'web') {
+    return {
+      boxShadow: `0px ${value}px ${value * 2}px rgba(0,0,0,0.2)`,
+    };
+  }
+  return {
+    elevation: value,
+  };
+};
 
 export default function SearchScreen() {
   const [query, setQuery] = useState('');
@@ -625,8 +638,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     position: 'relative',
-    boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-    elevation: 8,
+    ...getElevation(8),
   },
   spotlightImage: {
     width: '100%',

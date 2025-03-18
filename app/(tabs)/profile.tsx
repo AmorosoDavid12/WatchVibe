@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Image,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase, getCurrentSession } from '@/lib/supabase';
@@ -35,7 +36,13 @@ export default function ProfileScreen() {
     watchTime: 0,
   });
 
+  // Use an additional state to track if the component is mounted
+  const [isMounted, setIsMounted] = useState(true);
+
   useEffect(() => {
+    // Set mounted flag
+    setIsMounted(true);
+    
     // For debugging: check if the user_items table exists
     const checkTableStructure = async () => {
       try {
@@ -61,7 +68,7 @@ export default function ProfileScreen() {
     const loadProfileData = async () => {
       // Set a timeout for the entire loading process
       const timeout = setTimeout(() => {
-        if (loading) {
+        if (isMounted && loading) {
           console.log('Profile data loading timed out');
           setLoading(false);
           setError('Loading timed out. Please try again.');
@@ -74,16 +81,29 @@ export default function ProfileScreen() {
           fetchProfile(),
           fetchStats()
         ]);
+        
+        // Only update state if component is still mounted
+        if (isMounted) {
+          setLoading(false);
+        }
       } catch (error) {
         console.error('Error loading profile data:', error);
-        setError('Failed to load profile data');
+        // Only update state if component is still mounted
+        if (isMounted) {
+          setError('Failed to load profile data');
+          setLoading(false);
+        }
       } finally {
         clearTimeout(timeout);
-        setLoading(false);
       }
     };
 
     loadProfileData();
+
+    // Cleanup function to prevent state updates after unmount
+    return () => {
+      setIsMounted(false);
+    };
   }, []);
 
   async function fetchProfile() {
@@ -92,7 +112,7 @@ export default function ProfileScreen() {
       // Use our enhanced getCurrentSession instead of direct Supabase call
       const session = await getCurrentSession();
       
-      if (session?.user) {
+      if (session?.user && isMounted) {
         const user = session.user;
         // Get user data directly from auth session
         setProfile({
@@ -142,7 +162,7 @@ export default function ProfileScreen() {
         return;
       }
 
-      if (watched && watched.length > 0) {
+      if (watched && watched.length > 0 && isMounted) {
         const parsedWatched = watched.map((item: any) => {
           try {
             return JSON.parse(item.value);
@@ -220,19 +240,23 @@ export default function ProfileScreen() {
 
   return (
     <ScrollView style={styles.container}>
-      <Surface style={styles.header} elevation={2}>
-        <View style={styles.headerContent}>
+      <Card style={styles.header}>
+        <Card.Content style={styles.headerContent}>
           <Avatar.Image 
             size={100} 
             source={{ uri: profile?.avatar_url || 'https://images.unsplash.com/photo-1535713875002-d1d0cf377fde?q=80&w=200&auto=format&fit=crop' }} 
           />
           <Text variant="headlineMedium" style={styles.username}>{profile?.username || 'User'}</Text>
           <Text variant="bodyMedium" style={styles.email}>{profile?.email || ''}</Text>
-          <TouchableOpacity style={styles.settingsButton}>
+          <TouchableOpacity 
+            style={styles.settingsButton}
+            // Use style.pointerEvents instead of props.pointerEvents
+            accessibilityRole="button"
+          >
             <Settings size={24} color="#888" />
           </TouchableOpacity>
-        </View>
-      </Surface>
+        </Card.Content>
+      </Card>
 
       <Card style={styles.statsCard}>
         <Card.Content style={styles.statsContainer}>
@@ -287,6 +311,18 @@ export default function ProfileScreen() {
   );
 }
 
+// Platform-specific elevation styles to handle web vs native differences
+const getElevation = (value: number) => {
+  if (Platform.OS === 'web') {
+    return {
+      boxShadow: `0px ${value}px ${value * 2}px rgba(0,0,0,0.2)`,
+    };
+  }
+  return {
+    elevation: value,
+  };
+};
+
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -313,6 +349,9 @@ const styles = StyleSheet.create({
     padding: 20,
     backgroundColor: '#1a1a1a',
     marginBottom: 16,
+    marginHorizontal: 16,
+    marginTop: 16,
+    ...getElevation(2),
   },
   headerContent: {
     alignItems: 'center',
@@ -336,6 +375,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16,
     backgroundColor: '#1a1a1a',
+    ...getElevation(1),
   },
   statsContainer: {
     flexDirection: 'row',
@@ -353,7 +393,8 @@ const styles = StyleSheet.create({
   ratingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 4,
+    // Use marginLeft instead of gap for better compatibility
+    marginLeft: 4,
   },
   statLabel: {
     color: '#888',
@@ -368,6 +409,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 16,
     marginBottom: 16,
     backgroundColor: '#1a1a1a',
+    ...getElevation(1),
   },
   menuItem: {
     paddingVertical: 12,
