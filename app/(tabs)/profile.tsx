@@ -36,6 +36,27 @@ export default function ProfileScreen() {
   });
 
   useEffect(() => {
+    // For debugging: check if the user_items table exists
+    const checkTableStructure = async () => {
+      try {
+        console.log('Checking table structure...');
+        const { data, error } = await supabase
+          .from('user_items')
+          .select('*')
+          .limit(1);
+        
+        if (error) {
+          console.error('Error checking table structure:', error);
+        } else {
+          console.log('Table exists, sample data:', data);
+        }
+      } catch (err) {
+        console.error('Failed to check table structure:', err);
+      }
+    };
+    
+    checkTableStructure();
+    
     // Create a main loading function with timeout
     const loadProfileData = async () => {
       // Set a timeout for the entire loading process
@@ -45,7 +66,7 @@ export default function ProfileScreen() {
           setLoading(false);
           setError('Loading timed out. Please try again.');
         }
-      }, 5000); // 5 seconds timeout
+      }, 10000); // Increased from 5000 to 10000 ms
 
       try {
         // Run both fetch operations in parallel
@@ -108,7 +129,7 @@ export default function ProfileScreen() {
         .eq('type', 'watched');
       
       const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Stats query timed out')), 3000)
+        setTimeout(() => reject(new Error('Stats query timed out')), 5000)  // Increased from 3000 to 5000 ms
       );
       
       const { data: watched, error } = await Promise.race([
@@ -122,7 +143,7 @@ export default function ProfileScreen() {
       }
 
       if (watched && watched.length > 0) {
-        const parsedWatched = watched.map(item => {
+        const parsedWatched = watched.map((item: any) => {
           try {
             return JSON.parse(item.value);
           } catch (e) {

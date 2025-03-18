@@ -102,7 +102,20 @@ export const supabase = createClient(
 export async function getCurrentSession() {
   try {
     console.log('Getting current auth session...');
-    const result = await supabase.auth.getSession();
+    
+    // Create a timeout promise to prevent hanging
+    const timeoutPromise = new Promise((resolve) => 
+      setTimeout(() => {
+        console.log('Session fetch timed out, returning null');
+        resolve({ data: { session: null }, error: null });
+      }, 5000)
+    );
+    
+    // Race the session fetch against the timeout
+    const result = await Promise.race([
+      supabase.auth.getSession(),
+      timeoutPromise
+    ]) as any;
     
     if (result.data?.session) {
       console.log('Session found:', {
