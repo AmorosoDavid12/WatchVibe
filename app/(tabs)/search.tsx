@@ -522,7 +522,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   spotlightContainer: {
-    height: 300,
+    height: 220,
     marginHorizontal: 16,
     marginVertical: 16,
     borderRadius: 16,
@@ -543,10 +543,10 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    height: '60%',
+    height: '100%',
     // Note: backgroundImage with linear-gradient not supported in React Native
     // Using backgroundColor with opacity instead
-    backgroundColor: 'rgba(0,0,0,0.9)',
+    backgroundColor: 'rgba(0,0,0,0.7)',
   },
   spotlightContent: {
     position: 'absolute',
@@ -554,7 +554,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     padding: 16,
-    paddingTop: 60,
+    paddingTop: 30,
   },
   spotlightTitle: {
     color: '#fff',
