@@ -22,6 +22,17 @@ module.exports = async function (env, argv) {
     config.resolve.fallback = {};
   }
   config.resolve.fallback['missing-asset-registry-path'] = assetRegistryPatchPath;
+
+  // Ensure proper output configuration for production
+  if (env.mode === 'production') {
+    config.output = {
+      ...config.output,
+      publicPath: '/',
+      filename: '[name].[contenthash].js',
+      chunkFilename: '[name].[contenthash].js',
+      clean: true
+    };
+  }
   
   return config;
 }; 
