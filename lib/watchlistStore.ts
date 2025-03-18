@@ -91,12 +91,14 @@ export const useWatchlistStore = create<WatchlistState>()(
               return;
             }
             
+            console.log(`Removing item ${id} from watchlist for user ${session.user.id}`);
+            
             // Create a timeout promise
             const timeoutPromise = new Promise((resolve) => 
               setTimeout(() => {
                 console.log('Delete operation timed out');
                 resolve({ error: null });
-              }, 3000)
+              }, 5000) // Increased timeout to 5 seconds
             );
             
             // Send delete request to Supabase with timeout
@@ -117,7 +119,7 @@ export const useWatchlistStore = create<WatchlistState>()(
             if (result.error) {
               console.error('Error removing from watchlist:', result.error);
             } else {
-              console.log(`Removed item ${id} from watchlist for user ${session.user.id}`);
+              console.log(`Successfully removed item ${id} from watchlist in database`);
             }
           } catch (error) {
             console.error('Error syncing watchlist removal:', error);
@@ -179,7 +181,7 @@ export const useWatchlistStore = create<WatchlistState>()(
           console.log(`Fetched ${data.length} watchlist items from Supabase`);
           
           // Parse JSON from value field
-          const items = data.map(row => {
+          const items = data.map((row: any) => {
             try {
               return JSON.parse(row.value);
             } catch (e) {

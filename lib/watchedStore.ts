@@ -93,12 +93,14 @@ export const useWatchedStore = create<WatchedState>()(
               return;
             }
             
+            console.log(`Removing item ${id} from watched list for user ${session.user.id}`);
+            
             // Create a timeout promise
             const timeoutPromise = new Promise((resolve) => 
               setTimeout(() => {
                 console.log('Delete operation timed out');
                 resolve({ error: null });
-              }, 3000)
+              }, 5000) // Increased timeout to 5 seconds
             );
             
             // Send delete request to Supabase with timeout
@@ -119,10 +121,10 @@ export const useWatchedStore = create<WatchedState>()(
             if (result.error) {
               console.error('Error removing from watched list:', result.error);
             } else {
-              console.log(`Removed item ${id} from watched list for user ${session.user.id}`);
+              console.log(`Successfully removed item ${id} from watched list in database`);
             }
           } catch (error) {
-            console.error('Error syncing watched list removal:', error);
+            console.error('Error syncing watched removal:', error);
           }
         })();
       },
@@ -181,7 +183,7 @@ export const useWatchedStore = create<WatchedState>()(
           console.log(`Fetched ${data.length} watched items from Supabase`);
           
           // Parse JSON from value field
-          const items = data.map(row => {
+          const items = data.map((row: any) => {
             try {
               return JSON.parse(row.value);
             } catch (e) {

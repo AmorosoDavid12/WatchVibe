@@ -12,10 +12,11 @@ import {
 } from 'react-native';
 import { useWatchlistStore } from '../../lib/watchlistStore';
 import { searchContent, formatSearchResult, TMDbSearchResult, getTrending } from '../../lib/tmdb';
-import { Plus, Check, Film, Tv } from 'lucide-react-native';
+import { Plus, Check, Film, Tv, Repeat } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { debounce } from 'lodash';
 import Toast from 'react-native-toast-message';
+import { useWatchedStore } from '@/lib/watchedStore';
 
 const { width } = Dimensions.get('window');
 const COLUMN_COUNT = 2;
@@ -41,6 +42,8 @@ export default function SearchScreen() {
   const [error, setError] = useState<string | null>(null);
   const [isTrending, setIsTrending] = useState(true);
   const { addItem, hasItem } = useWatchlistStore();
+  const { items: watchlistItems, addItem: addToWatchlist, hasItem: isInWatchlist } = useWatchlistStore();
+  const { items: watchedItems, hasItem: isInWatched, removeItem: removeFromWatched } = useWatchedStore();
   const router = useRouter();
 
   // Fetch trending items on initial load
@@ -128,7 +131,7 @@ export default function SearchScreen() {
     const formattedResult = formatSearchResult(result);
     if (formattedResult) {
       const title = formattedResult.title;
-      const added = addItem(formattedResult);
+      const added = addToWatchlist(formattedResult);
       if (added) {
         console.log(`Added to watchlist: ${title}`);
         showToast(`"${title}" added to watchlist`, 'success');
@@ -138,10 +141,31 @@ export default function SearchScreen() {
     }
   };
 
+  const handleRewatchItem = (result: TMDbSearchResult) => {
+    const formattedResult = formatSearchResult(result);
+    if (formattedResult) {
+      const title = formattedResult.title;
+      
+      // Remove from watched list first
+      removeFromWatched(result.id);
+      
+      // Then add to watchlist
+      const added = addToWatchlist(formattedResult);
+      
+      if (added) {
+        console.log(`Moved "${title}" from watched to watchlist for rewatching`);
+        showToast(`"${title}" moved to watchlist for rewatching`, 'success');
+      } else {
+        showToast(`"${title}" is already in your watchlist`, 'info');
+      }
+    }
+  };
+
   const renderItem = ({ item }: { item: TMDbSearchResult }) => {
     if (item.media_type === 'person') return null;
 
-    const isInWatchlist = hasItem(item.id);
+    const inWatchlist = isInWatchlist(item.id);
+    const inWatched = isInWatched(item.id);
     const title = item.title || item.name || '';
     const year = new Date(item.release_date || item.first_air_date || '').getFullYear();
     const yearText = !isNaN(year) ? year.toString() : '';
@@ -185,17 +209,26 @@ export default function SearchScreen() {
           </Text>
           <Text style={styles.rating}>★ {item.vote_average.toFixed(1)}</Text>
         </View>
-        {!isInWatchlist ? (
+        
+        {/* Action buttons - three states: Add to watchlist, Already added, or Rewatch */}
+        {inWatchlist ? (
+          <View style={styles.addedButton}>
+            <Check size={20} color="#4CAF50" />
+          </View>
+        ) : inWatched ? (
+          <TouchableOpacity
+            style={styles.rewatchButton}
+            onPress={() => handleRewatchItem(item)}
+          >
+            <Repeat size={20} color="#2196F3" />
+          </TouchableOpacity>
+        ) : (
           <TouchableOpacity
             style={styles.addButton}
             onPress={() => handleAddToWatchlist(item)}
           >
             <Plus size={20} color="#4CAF50" />
           </TouchableOpacity>
-        ) : (
-          <View style={styles.addedButton}>
-            <Check size={20} color="#4CAF50" />
-          </View>
         )}
       </TouchableOpacity>
     );
@@ -329,6 +362,15 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   addedButton: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderRadius: 12,
+    padding: 4,
+    zIndex: 1,
+  },
+  rewatchButton: {
     position: 'absolute',
     top: 8,
     right: 8,
