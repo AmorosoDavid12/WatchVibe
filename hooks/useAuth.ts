@@ -30,12 +30,16 @@ export default function useAuth() {
   // Function to sync all data
   const syncAllData = async () => {
     try {
+      console.log('Starting data synchronization');
       await Promise.all([
         syncWatchlist(),
         syncWatched()
       ]);
+      console.log('Data synchronization completed');
+      return true;
     } catch (error) {
       console.error('Error syncing data:', error);
+      return false;
     }
   };
 
@@ -116,11 +120,16 @@ export default function useAuth() {
    * Contains special logic for password recovery sessions
    */
   useEffect(() => {
+    let isComponentMounted = true;
+    
     // Get initial session without immediate navigation
     const getInitialSession = async () => {
       try {
         setIsLoading(true);
+        console.log('Getting initial session...');
         const { data: sessionData } = await supabase.auth.getSession();
+        
+        if (!isComponentMounted) return;
         
         if (sessionData?.session) {
           // IMPORTANT: Do not consider users in recovery mode as "logged in"
@@ -128,26 +137,36 @@ export default function useAuth() {
           const isRecoverySession = typeof window !== 'undefined' && 
                                     localStorage.getItem('isRecoverySession') === 'true';
           
+          console.log('Session found, recovery session:', isRecoverySession);
+          
           // Only consider the user logged in if it's NOT a recovery session
           const isLoggedInState = !isRecoverySession;
           setIsLoggedIn(isLoggedInState);
           
           // If logged in and not in recovery, sync data
           if (isLoggedInState) {
-            await syncAllData();
+            try {
+              await syncAllData();
+            } catch (syncError) {
+              console.error('Error during initial data sync:', syncError);
+              // Continue even if sync fails
+            }
           }
         } else {
+          console.log('No session found');
           setIsLoggedIn(false);
         }
-        
-        // Mark as initialized - this will allow the root layout to render
-        setAuthInitialized(true);
       } catch (error) {
         console.error('Error getting initial session:', error);
-        // Still mark as initialized even in case of error
-        setAuthInitialized(true);
+        if (isComponentMounted) {
+          setIsLoggedIn(false);
+        }
       } finally {
-        setIsLoading(false);
+        if (isComponentMounted) {
+          // Mark as initialized, regardless of success/failure
+          setAuthInitialized(true);
+          setIsLoading(false);
+        }
       }
     };
 
@@ -159,7 +178,10 @@ export default function useAuth() {
         console.log('Auth state changed:', event, 'Is recovery session:', localStorage.getItem('isRecoverySession'));
         
         // Skip if router not ready to prevent navigation errors
-        if (!isRouterReady) return;
+        if (!isRouterReady) {
+          console.log('Router not ready, skipping navigation');
+          return;
+        }
         
         // Skip navigation for auth callback pages to prevent loops
         const currentPath = segments.join('/');
@@ -205,13 +227,20 @@ export default function useAuth() {
         
         // For non-recovery sessions, update logged in state and sync data
         const isAuthenticated = !!session;
-        const isRecoverySession = typeof window !== 'undefined' && 
-                               localStorage.getItem('isRecoverySession') === 'true';
         setIsLoggedIn(isAuthenticated);
+
+        // Get recovery session status
+        const isRecoverySession = typeof window !== 'undefined' && 
+                                localStorage.getItem('isRecoverySession') === 'true';
 
         // If user just logged in and it's not a recovery session, sync data
         if (isAuthenticated && !isRecoverySession) {
-          await syncAllData();
+          try {
+            await syncAllData();
+          } catch (syncError) {
+            console.error('Error during auth change data sync:', syncError);
+            // Continue even if sync fails
+          }
         }
 
         // Default protection - redirect based on auth state
@@ -226,16 +255,19 @@ export default function useAuth() {
             }
           } else if (isAuthGroup) {
             // Normal logged in state - redirect to app
+            console.log('Redirecting to app tabs');
             router.replace('/(tabs)');
           }
         } else if (!session && !isAuthGroup) {
           // Not logged in, not on auth page, redirect to login
+          console.log('Not logged in, redirecting to login');
           router.replace('/login');
         }
       }
     );
 
     return () => {
+      isComponentMounted = false;
       subscription.unsubscribe();
     };
   }, [isRouterReady, router, segments, syncWatchlist, syncWatched]);
