@@ -36,13 +36,17 @@ export const useWatchedStore = create<WatchedState>()(
         }));
         
         // Sync with Supabase
-        const userId = supabase.auth.getUser().then(({ data }) => {
+        supabase.auth.getUser().then(({ data }) => {
           if (data?.user) {
             supabase.from('watched').upsert({
               user_id: data.user.id,
               item_id: item.id,
               item_data: item,
               created_at: new Date().toISOString()
+            }).then(result => {
+              if (result.error) {
+                console.error('Error adding to watched:', result.error);
+              }
             });
           }
         });
@@ -55,11 +59,17 @@ export const useWatchedStore = create<WatchedState>()(
         }));
         
         // Remove from Supabase
-        const userId = supabase.auth.getUser().then(({ data }) => {
+        supabase.auth.getUser().then(({ data }) => {
           if (data?.user) {
             supabase.from('watched')
               .delete()
-              .match({ user_id: data.user.id, item_id: id });
+              .eq('user_id', data.user.id)
+              .eq('item_id', id)
+              .then(result => {
+                if (result.error) {
+                  console.error('Error removing from watched:', result.error);
+                }
+              });
           }
         });
       },
@@ -69,15 +79,19 @@ export const useWatchedStore = create<WatchedState>()(
         }));
         
         // Update order in Supabase
-        const userId = supabase.auth.getUser().then(({ data }) => {
+        supabase.auth.getUser().then(({ data }) => {
           if (data?.user) {
-            // Get existing items and delete them
+            // Get existing items and update them
             items.forEach((item, index) => {
               supabase.from('watched').upsert({
                 user_id: data.user.id,
                 item_id: item.id,
                 item_data: item,
                 order: index
+              }).then(result => {
+                if (result.error) {
+                  console.error('Error reordering watched:', result.error);
+                }
               });
             });
           }
@@ -88,20 +102,30 @@ export const useWatchedStore = create<WatchedState>()(
       },
       syncWithSupabase: async () => {
         try {
+          console.log('Syncing watched list with Supabase');
           const { data: userData } = await supabase.auth.getUser();
           if (userData?.user) {
-            // Fetch watched from Supabase
+            // Fetch watched from Supabase using proper API format
             const { data: watchedData, error } = await supabase
               .from('watched')
               .select('*')
-              .eq('user_id', userData.user.id)
-              .order('order');
+              .eq('user_id', userData.user.id);
               
-            if (!error && watchedData) {
-              // Create a new array with the items sorted by order
+            if (error) {
+              console.error('Supabase query error:', error);
+              return;
+            }
+              
+            if (watchedData && watchedData.length > 0) {
+              console.log('Retrieved watched items:', watchedData.length);
+              // Create a new array with the items
               const items = watchedData.map(item => item.item_data as WatchedItem);
               set({ items });
+            } else {
+              console.log('No watched items found');
             }
+          } else {
+            console.log('No user data found');
           }
         } catch (error) {
           console.error('Error syncing with Supabase:', error);

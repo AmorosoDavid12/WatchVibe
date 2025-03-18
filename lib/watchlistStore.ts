@@ -42,13 +42,17 @@ export const useWatchlistStore = create<WatchlistState>()(
         }));
         
         // Sync with Supabase
-        const userId = supabase.auth.getUser().then(({ data }) => {
+        supabase.auth.getUser().then(({ data }) => {
           if (data?.user) {
             supabase.from('watchlist').upsert({
               user_id: data.user.id,
               item_id: item.id,
               item_data: item,
               created_at: new Date().toISOString()
+            }).then(result => {
+              if (result.error) {
+                console.error('Error adding to watchlist:', result.error);
+              }
             });
           }
         });
@@ -61,11 +65,17 @@ export const useWatchlistStore = create<WatchlistState>()(
         }));
         
         // Remove from Supabase
-        const userId = supabase.auth.getUser().then(({ data }) => {
+        supabase.auth.getUser().then(({ data }) => {
           if (data?.user) {
             supabase.from('watchlist')
               .delete()
-              .match({ user_id: data.user.id, item_id: id });
+              .eq('user_id', data.user.id)
+              .eq('item_id', id)
+              .then(result => {
+                if (result.error) {
+                  console.error('Error removing from watchlist:', result.error);
+                }
+              });
           }
         });
       },
@@ -75,15 +85,19 @@ export const useWatchlistStore = create<WatchlistState>()(
         }));
         
         // Update order in Supabase
-        const userId = supabase.auth.getUser().then(({ data }) => {
+        supabase.auth.getUser().then(({ data }) => {
           if (data?.user) {
-            // Get existing items and delete them
+            // Get existing items and update them
             items.forEach((item, index) => {
               supabase.from('watchlist').upsert({
                 user_id: data.user.id,
                 item_id: item.id,
                 item_data: item,
                 order: index
+              }).then(result => {
+                if (result.error) {
+                  console.error('Error reordering watchlist:', result.error);
+                }
               });
             });
           }
@@ -94,20 +108,30 @@ export const useWatchlistStore = create<WatchlistState>()(
       },
       syncWithSupabase: async () => {
         try {
+          console.log('Syncing watchlist with Supabase');
           const { data: userData } = await supabase.auth.getUser();
           if (userData?.user) {
-            // Fetch watchlist from Supabase
+            // Fetch watchlist from Supabase using proper API format
             const { data: watchlistData, error } = await supabase
               .from('watchlist')
               .select('*')
-              .eq('user_id', userData.user.id)
-              .order('order');
+              .eq('user_id', userData.user.id);
               
-            if (!error && watchlistData) {
-              // Create a new array with the items sorted by order
+            if (error) {
+              console.error('Supabase query error:', error);
+              return;
+            }
+              
+            if (watchlistData && watchlistData.length > 0) {
+              console.log('Retrieved watchlist items:', watchlistData.length);
+              // Create a new array with the items
               const items = watchlistData.map(item => item.item_data as WatchlistItem);
               set({ items });
+            } else {
+              console.log('No watchlist items found');
             }
+          } else {
+            console.log('No user data found');
           }
         } catch (error) {
           console.error('Error syncing with Supabase:', error);

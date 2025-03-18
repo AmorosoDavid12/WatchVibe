@@ -38,7 +38,7 @@ export const supabase = createClient(
       storage: ExpoSecureStoreAdapter as any,
       autoRefreshToken: true,
       persistSession: true,
-      detectSessionInUrl: false,
+      detectSessionInUrl: true,
     },
     // Add global fetch parameters to help with CORS
     global: {
@@ -53,6 +53,9 @@ export const supabase = createClient(
               ...options.headers,
               'Accept': 'application/json',
               'apikey': constants.SUPABASE_ANON_KEY,
+              'Content-Type': 'application/json',
+              'Prefer': 'return=minimal',
+              'Authorization': `Bearer ${constants.SUPABASE_ANON_KEY}`
             },
           };
           return fetch(url, fetchOptions);
