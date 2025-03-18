@@ -20,6 +20,7 @@ export default function useAuth() {
   const [isLoading, setIsLoading] = useState(true);
   const [authInitialized, setAuthInitialized] = useState(false);
   const [authStateChanges, setAuthStateChanges] = useState(0);
+  const [startupComplete, setStartupComplete] = useState(false);
   const segments = useSegments();
   const router = useRouter();
   const [isRouterReady, setIsRouterReady] = useState(false);
@@ -101,6 +102,57 @@ export default function useAuth() {
   }, []);
 
   /**
+   * Prevent flash of login page on reload when logged in
+   * Cache auth state in local storage for immediate use before session check
+   */
+  useEffect(() => {
+    const readCachedAuthState = () => {
+      if (typeof window === 'undefined') return;
+      
+      try {
+        // Check if we have a cached auth state that's recent
+        const cachedAuthTimestamp = localStorage.getItem('authStateTimestamp');
+        const cachedAuthState = localStorage.getItem('authState');
+        
+        if (cachedAuthTimestamp && cachedAuthState) {
+          const timestamp = parseInt(cachedAuthTimestamp, 10);
+          const now = Date.now();
+          const fiveMinutesMs = 5 * 60 * 1000;
+          
+          // Only use cached state if it's less than 5 minutes old
+          if (now - timestamp < fiveMinutesMs) {
+            console.log('Using cached auth state');
+            // Pre-set from cache, will be validated by session check
+            setIsLoggedIn(cachedAuthState === 'true');
+          }
+        }
+      } catch (error) {
+        console.error('Error reading cached auth state:', error);
+      }
+    };
+    
+    readCachedAuthState();
+  }, []);
+
+  /**
+   * Cache auth state for next page load
+   */
+  useEffect(() => {
+    const cacheAuthState = () => {
+      if (typeof window === 'undefined' || isLoggedIn === null) return;
+      
+      try {
+        localStorage.setItem('authState', isLoggedIn.toString());
+        localStorage.setItem('authStateTimestamp', Date.now().toString());
+      } catch (error) {
+        console.error('Error caching auth state:', error);
+      }
+    };
+    
+    cacheAuthState();
+  }, [isLoggedIn]);
+
+  /**
    * Recovery session redirect handler
    * This effect ensures users in a recovery session stay on the reset password page
    * This runs AFTER the router is ready to prevent "navigation before mount" errors
@@ -149,6 +201,7 @@ export default function useAuth() {
         console.log('Safety timeout triggered - forcing auth initialization');
         setAuthInitialized(true);
         setIsLoading(false);
+        setStartupComplete(true);
       }
     }, 5000);
     
@@ -206,6 +259,7 @@ export default function useAuth() {
           setTimeout(() => {
             if (isComponentMounted) {
               setIsLoading(false);
+              setStartupComplete(true);
             }
           }, 300);
         }
@@ -337,7 +391,7 @@ export default function useAuth() {
     // Check if we're on a protected route
     const isProtectedRoute = segments[0] === '(tabs)';
     const isAuthRoute = segments[0] === '(auth)' || currentPath.includes('login');
-    const isRootRoute = segments.length <= 0;
+    const isRootRoute = !segments[0] || currentPath === '' || currentPath === '/';
     
     // Prevent direct navigation during logout flow to avoid loops
     const isLoggingOut = typeof window !== 'undefined' && 
@@ -358,8 +412,9 @@ export default function useAuth() {
         }, 200);
       }
     } else {
-      // User is NOT logged in
-      if (isProtectedRoute) {
+      // IMPORTANT: Only redirect to login if we've completed startup
+      // This prevents the "flash of login screen" on reload when logged in
+      if (isProtectedRoute && startupComplete) {
         console.log('User not logged in but on protected route, redirecting to login');
         // Debounce navigation to prevent rapid redirects
         navigationTimer = setTimeout(() => {
@@ -373,12 +428,13 @@ export default function useAuth() {
         clearTimeout(navigationTimer);
       }
     };
-  }, [isLoggedIn, segments, isRouterReady, authInitialized, router, authStateChanges]);
+  }, [isLoggedIn, segments, isRouterReady, authInitialized, router, authStateChanges, startupComplete]);
 
   return {
     isLoggedIn,
     isLoading,
-    authInitialized
+    authInitialized,
+    startupComplete
   };
 }
 

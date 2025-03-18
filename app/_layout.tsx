@@ -23,7 +23,7 @@ const theme = {
 
 export default function RootLayout() {
   useFrameworkReady();
-  const { isLoggedIn, isLoading: authLoading, authInitialized } = useAuth();
+  const { isLoggedIn, isLoading: authLoading, authInitialized, startupComplete } = useAuth();
   const [forceLoaded, setForceLoaded] = useState(false);
   const [dataInitialized, setDataInitialized] = useState(false);
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
@@ -45,7 +45,8 @@ export default function RootLayout() {
     const shouldBeLoading = !initialLoadComplete && (
       (!authInitialized && !forceLoaded) || 
       (watchlistLoading && watchedLoading) ||
-      (!watchlistInitialized && !watchedInitialized && !dataInitialized)
+      (!watchlistInitialized && !watchedInitialized && !dataInitialized) ||
+      !startupComplete
     );
     
     if (shouldBeLoading) {
@@ -60,7 +61,7 @@ export default function RootLayout() {
     
     return () => clearTimeout(timer);
   }, [authInitialized, forceLoaded, watchlistLoading, watchedLoading, 
-      watchlistInitialized, watchedInitialized, dataInitialized, initialLoadComplete]);
+      watchlistInitialized, watchedInitialized, dataInitialized, initialLoadComplete, startupComplete]);
   
   // Safety timeout to prevent getting stuck on the loading screen
   useEffect(() => {
@@ -89,7 +90,7 @@ export default function RootLayout() {
 
   // Initialize data stores once auth is initialized
   useEffect(() => {
-    if ((authInitialized || forceLoaded) && !dataInitialized) {
+    if ((authInitialized || forceLoaded) && !dataInitialized && startupComplete) {
       // Start parallel sync operations
       const initializeData = async () => {
         try {
@@ -113,19 +114,19 @@ export default function RootLayout() {
       
       initializeData();
     }
-  }, [authInitialized, forceLoaded, dataInitialized]);
+  }, [authInitialized, forceLoaded, dataInitialized, startupComplete]);
   
   // Mark loading complete when auth changes
   useEffect(() => {
     // When auth state changes from null to a value, it indicates auth is complete
-    if (isLoggedIn !== null && !initialLoadComplete) {
+    if (isLoggedIn !== null && !initialLoadComplete && startupComplete) {
       console.log('Auth state determined, setting initial load complete');
       // Slight delay to ensure smooth transition
       setTimeout(() => {
         setInitialLoadComplete(true);
       }, 200);
     }
-  }, [isLoggedIn, initialLoadComplete]);
+  }, [isLoggedIn, initialLoadComplete, startupComplete]);
 
   if (fadeLoading) {
     return (
