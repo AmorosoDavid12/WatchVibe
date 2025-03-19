@@ -8,6 +8,7 @@ import { PaperProvider, MD3DarkTheme } from 'react-native-paper';
 import Toast from 'react-native-toast-message';
 import { useWatchlistStore } from '@/lib/watchlistStore';
 import { useWatchedStore } from '@/lib/watchedStore';
+import { useDataLoadingStore } from '@/lib/dataLoadingStore';
 
 // Create custom theme based on dark theme
 const theme = {
@@ -36,6 +37,16 @@ export default function RootLayout() {
   const watchedLoading = useWatchedStore(state => state.isLoading);
   const watchlistInitialized = useWatchlistStore(state => state.isInitialized);
   const watchedInitialized = useWatchedStore(state => state.isInitialized);
+  
+  // Get data loading coordinator
+  const { syncAllData, markDataSynced, resetSyncState } = useDataLoadingStore();
+  
+  // Reset data sync state on logout
+  useEffect(() => {
+    if (isLoggedIn === false) {
+      resetSyncState();
+    }
+  }, [isLoggedIn, resetSyncState]);
   
   // Debounce loading changes to prevent flickering
   useEffect(() => {
@@ -95,11 +106,8 @@ export default function RootLayout() {
       const initializeData = async () => {
         try {
           console.log('Initializing data stores...');
-          // Run both syncs in parallel
-          await Promise.all([
-            syncWatchlist(),
-            syncWatched()
-          ]);
+          // Use the data coordinator for sync
+          await syncAllData();
           console.log('Data stores initialized successfully');
         } catch (error) {
           console.error('Failed to initialize data stores:', error);
@@ -108,13 +116,15 @@ export default function RootLayout() {
           setTimeout(() => {
             setDataInitialized(true);
             setInitialLoadComplete(true);
+            // Mark data as synced in the coordinator
+            markDataSynced(true);
           }, 300);
         }
       };
       
       initializeData();
     }
-  }, [authInitialized, forceLoaded, dataInitialized, startupComplete]);
+  }, [authInitialized, forceLoaded, dataInitialized, startupComplete, syncAllData, markDataSynced]);
   
   // Mark loading complete when auth changes
   useEffect(() => {

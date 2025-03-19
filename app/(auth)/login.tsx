@@ -99,25 +99,14 @@ export default function LoginScreen() {
         }
         setLoading(false);
       } else {
-        console.log('Login successful, syncing data before redirect...');
-        
-        try {
-          // Explicitly sync data after login to ensure data is loaded
-          await Promise.all([
-            syncWatchlist(),
-            syncWatched()
-          ]);
-          console.log('Data sync completed successfully');
-        } catch (syncError) {
-          console.error('Data sync error:', syncError);
-          // Continue even if sync fails
-        }
+        console.log('Login successful, redirecting to loading screen...');
         
         // Add a small delay before redirect to ensure session is properly established
-        await new Promise(resolve => setTimeout(resolve, 500));
+        await new Promise(resolve => setTimeout(resolve, 400));
         
-        // Use router.push instead of replace to prevent navigation history issues
-        router.push('/(tabs)');
+        // Navigate to loading screen instead of directly to tabs
+        // The loading screen will handle data sync and then redirect to tabs
+        router.push('/loading');
       }
     } catch (error: any) {
       console.error('Login exception:', error);

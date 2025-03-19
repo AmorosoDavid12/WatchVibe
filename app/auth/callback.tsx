@@ -151,23 +151,11 @@ export default function AuthCallbackPage() {
       return;
     }
 
-    try {
-      console.log('Successful authentication, syncing data before redirect...');
-      
-      // Explicitly sync data before redirecting to ensure data is loaded
-      await Promise.all([
-        syncWatchlist(),
-        syncWatched()
-      ]);
-      console.log('Data sync completed successfully');
-    } catch (syncError) {
-      console.error('Data sync error in callback:', syncError);
-      // Continue even if sync fails
-    }
+    console.log('Successful authentication, redirecting to loading screen...');
     
-    // Redirect to home page
+    // No need to explicitly sync data here, the loading screen will handle it
     setIsProcessing(false);
-    router.replace('/(tabs)');
+    router.replace('/loading');
   };
 
   return (
