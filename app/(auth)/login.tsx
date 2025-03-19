@@ -5,6 +5,8 @@ import { supabase, login, clearAuthTokens } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText, Divider } from 'react-native-paper';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
 import * as Linking from 'expo-linking';
+import { useWatchlistStore } from '@/lib/watchlistStore';
+import { useWatchedStore } from '@/lib/watchedStore';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -19,6 +21,9 @@ export default function LoginScreen() {
   const [secureConfirmTextEntry, setSecureConfirmTextEntry] = useState(true);
   const [isPasswordReset, setIsPasswordReset] = useState(false);
   const [isCheckingUser, setIsCheckingUser] = useState(true);
+  
+  const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
+  const syncWatched = useWatchedStore(state => state.syncWithSupabase);
   
   // Check if this is a password reset flow
   useEffect(() => {
@@ -94,7 +99,19 @@ export default function LoginScreen() {
         }
         setLoading(false);
       } else {
-        console.log('Login successful, redirecting...');
+        console.log('Login successful, syncing data before redirect...');
+        
+        try {
+          // Explicitly sync data after login to ensure data is loaded
+          await Promise.all([
+            syncWatchlist(),
+            syncWatched()
+          ]);
+          console.log('Data sync completed successfully');
+        } catch (syncError) {
+          console.error('Data sync error:', syncError);
+          // Continue even if sync fails
+        }
         
         // Add a small delay before redirect to ensure session is properly established
         await new Promise(resolve => setTimeout(resolve, 500));

@@ -4,6 +4,8 @@ import { Text } from 'react-native-paper';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { useNavigation } from '@react-navigation/native';
+import { useWatchlistStore } from '@/lib/watchlistStore';
+import { useWatchedStore } from '@/lib/watchedStore';
 
 interface HashParams {
   [key: string]: string;
@@ -17,6 +19,10 @@ export default function AuthCallbackPage() {
   const error_description = params.error_description as string;
   const [isProcessing, setIsProcessing] = useState(true);
   const [errorState, setErrorState] = useState<string | null>(null);
+
+  // Get sync functions from stores
+  const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
+  const syncWatched = useWatchedStore(state => state.syncWithSupabase);
 
   useEffect(() => {
     // Set up auth state change listener
@@ -62,20 +68,9 @@ export default function AuthCallbackPage() {
         });
         
         return;
-      }
-      
-      if (event === 'SIGNED_IN') {
-        console.log('User signed in');
-        
-        // Check if this is a recovery session
-        if (typeof window !== 'undefined' && localStorage.getItem('isRecoverySession') === 'true') {
-          console.log('Recovery session detected, redirecting to reset password');
-          router.replace('/reset-password');
-          return;
-        }
-        
-        // Normal sign in - redirect to home
-        router.replace('/');
+      } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
+        // Normal sign in - handle data sync and redirect
+        handleSuccessfulSignIn();
         return;
       }
     });
@@ -146,6 +141,34 @@ export default function AuthCallbackPage() {
       }
     };
   }, [router, params]);
+
+  const handleSuccessfulSignIn = async () => {
+    // Check if this is a recovery session
+    if (typeof window !== 'undefined' && localStorage.getItem('isRecoverySession') === 'true') {
+      console.log('Recovery session detected, redirecting to reset password');
+      setIsProcessing(false);
+      router.replace('/reset-password');
+      return;
+    }
+
+    try {
+      console.log('Successful authentication, syncing data before redirect...');
+      
+      // Explicitly sync data before redirecting to ensure data is loaded
+      await Promise.all([
+        syncWatchlist(),
+        syncWatched()
+      ]);
+      console.log('Data sync completed successfully');
+    } catch (syncError) {
+      console.error('Data sync error in callback:', syncError);
+      // Continue even if sync fails
+    }
+    
+    // Redirect to home page
+    setIsProcessing(false);
+    router.replace('/(tabs)');
+  };
 
   return (
     <View style={styles.container}>
