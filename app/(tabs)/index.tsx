@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { 
   View, 
   Text, 
@@ -13,7 +13,7 @@ import {
 import { useWatchlistStore } from '../../lib/watchlistStore';
 import { useWatchedStore } from '../../lib/watchedStore';
 import { WatchlistItem } from '../../lib/watchlistStore';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { Plus, MoreVertical, Star, Film, Tv } from 'lucide-react-native';
 import Toast from 'react-native-toast-message';
 import { getMovieDetails, getTVDetails } from '../../lib/tmdb';
@@ -39,7 +39,7 @@ const showToast = (message: string, type: 'success' | 'error' | 'info' = 'succes
 };
 
 export default function WatchlistScreen() {
-  const { items, removeItem, isLoading: storeLoading, isInitialized } = useWatchlistStore();
+  const { items, removeItem, isLoading: storeLoading, isInitialized, syncWithSupabase } = useWatchlistStore();
   const { addItem: addToWatched } = useWatchedStore();
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState('All');
@@ -47,6 +47,40 @@ export default function WatchlistScreen() {
   const [selectedItem, setSelectedItem] = useState<WatchlistItem | null>(null);
   const [enrichedItems, setEnrichedItems] = useState<EnrichedItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [lastSyncTime, setLastSyncTime] = useState(0);
+
+  // Initial data loading
+  useEffect(() => {
+    const loadData = async () => {
+      console.log('Initial watchlist sync');
+      await syncWithSupabase();
+    };
+    
+    // Only sync if not already initialized to avoid double loading
+    if (!isInitialized) {
+      loadData();
+    }
+  }, [syncWithSupabase, isInitialized]);
+
+  // Sync with Supabase when the tab is focused
+  useFocusEffect(
+    useCallback(() => {
+      const currentTime = Date.now();
+      // Only sync if more than 10 seconds have passed since last sync
+      // This prevents excessive API calls when quickly switching tabs
+      if (currentTime - lastSyncTime > 10000) {
+        console.log('Tab focused, syncing watchlist with Supabase');
+        syncWithSupabase();
+        setLastSyncTime(currentTime);
+      } else {
+        console.log('Skipping sync due to recent sync');
+      }
+      
+      return () => {
+        // Cleanup if needed when unfocusing
+      };
+    }, [syncWithSupabase, lastSyncTime])
+  );
 
   useEffect(() => {
     // Don't try to process items until store is initialized

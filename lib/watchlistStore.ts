@@ -160,7 +160,7 @@ export const useWatchlistStore = create<WatchlistState>()(
             setTimeout(() => {
               console.log('Watchlist sync timed out');
               resolve({ data: null, error: new Error('Timeout') });
-            }, 5000)
+            }, 8000) // Extended timeout for potentially slow connections
           );
           
           // Fetch data from Supabase with timeout
@@ -184,7 +184,16 @@ export const useWatchlistStore = create<WatchlistState>()(
           
           if (!data || data.length === 0) {
             console.log('No watchlist data received');
-            set({ isLoading: false, isInitialized: true });
+            // If we had items before but now we got none, keep the existing items
+            // to prevent flickering on brief network issues - only clear if it's first load
+            const currentItems = get().items;
+            if (!get().isInitialized || currentItems.length === 0) {
+              // Only update with empty array on first load
+              set({ items: [], isLoading: false, isInitialized: true });
+            } else {
+              console.log('Preserving existing watchlist items due to empty response');
+              set({ isLoading: false, isInitialized: true });
+            }
             return true; // No data is not an error
           }
 

@@ -298,10 +298,34 @@ export const logout = async (currentDeviceOnly: boolean = false): Promise<void> 
     
     // For web platforms, manually clear localStorage tokens
     if (Platform.OS === 'web') {
-      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token');
-      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier');
-      localStorage.removeItem('supabase.auth.token');
-      localStorage.removeItem('loggingOut');
+      const keys = [
+        'sb-gihofdmqjwgkotwxdxms-auth-token',
+        'sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier',
+        'supabase.auth.token',
+        'loggingOut',
+        'watchlist-storage',  // Clear watchlist storage too for clean logout
+        'watched-storage'     // Clear watched storage too for clean logout
+      ];
+      
+      keys.forEach(key => {
+        try {
+          localStorage.removeItem(key);
+        } catch (e) {
+          console.error(`Error removing ${key}:`, e);
+        }
+      });
+    }
+    
+    // Clean up all Zustand stores that persist data
+    try {
+      if (typeof window !== 'undefined') {
+        // Add additional storage keys if needed
+        ['watchlist-storage', 'watched-storage'].forEach(key => {
+          localStorage.removeItem(key);
+        });
+      }
+    } catch (err) {
+      console.error('Error clearing Zustand stores:', err);
     }
     
     // Ensure we have a timeout so the function doesn't hang indefinitely
@@ -309,10 +333,11 @@ export const logout = async (currentDeviceOnly: boolean = false): Promise<void> 
       setTimeout(() => {
         console.log('Logout API call timed out, continuing with local logout');
         resolve();
-      }, 3000);
+      }, 5000); // Extended timeout for global signout
     });
     
     // Call Supabase signOut with appropriate scope
+    // Important: The global scope only works if the server has PKCE flow enabled correctly
     const signOutPromise = supabase.auth.signOut({
       scope: currentDeviceOnly ? 'local' : 'global'
     }).then(() => {
@@ -323,6 +348,32 @@ export const logout = async (currentDeviceOnly: boolean = false): Promise<void> 
     
     // Wait for signOut or timeout, whichever comes first
     await Promise.race([signOutPromise, timeoutPromise]);
+    
+    // For global signout, try an additional direct API call if needed
+    if (!currentDeviceOnly) {
+      try {
+        // Make a direct API call to revoke all sessions
+        const directLogoutPromise = fetch(`${constants.SUPABASE_URL}/auth/v1/logout`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'apikey': constants.SUPABASE_ANON_KEY,
+            'Authorization': `Bearer ${constants.SUPABASE_ANON_KEY}`
+          },
+          body: JSON.stringify({ scope: 'global' })
+        });
+        
+        const directTimeoutPromise = new Promise((_, reject) => 
+          setTimeout(() => reject(new Error('Direct logout API call timed out')), 3000)
+        );
+        
+        await Promise.race([directLogoutPromise, directTimeoutPromise])
+          .then(() => console.log('Direct logout API call completed'))
+          .catch(err => console.log('Direct logout API call failed:', err));
+      } catch (e) {
+        console.error('Error making direct logout API call:', e);
+      }
+    }
     
     console.log('Logout completed');
   } catch (error) {
