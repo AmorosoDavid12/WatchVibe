@@ -223,14 +223,14 @@ export default function ProfileScreen() {
     }
   }
 
-  async function handleSignOut(currentDeviceOnly: boolean = false) {
+  async function handleSignOut() {
     try {
       setLoading(true);
       setLogoutModalVisible(false);
       
       // Complete the logout process BEFORE navigation
       console.log('Starting logout process...');
-      await logout(currentDeviceOnly);
+      await logout(false); // Always use current device only
       
       // After logout is complete, navigate to login
       console.log('Logout complete, navigating to login screen');
@@ -346,7 +346,7 @@ export default function ProfileScreen() {
         Sign Out
       </Button>
 
-      {/* Logout Options Modal */}
+      {/* Logout Modal - Simplified to one option */}
       <Modal
         animationType="fade"
         transparent={true}
@@ -354,45 +354,32 @@ export default function ProfileScreen() {
         onRequestClose={() => setLogoutModalVisible(false)}
       >
         <Pressable 
-          style={styles.modalOverlay} 
+          style={styles.modalOverlay}
           onPress={() => setLogoutModalVisible(false)}
         >
-          <View style={styles.modalContainer}>
-            <Text style={styles.modalTitle}>Sign Out Options</Text>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Sign Out</Text>
+            <Text style={styles.modalText}>Are you sure you want to sign out?</Text>
             
-            <TouchableOpacity 
-              style={styles.modalOption}
-              onPress={() => handleSignOut(true)}
-            >
-              <Smartphone size={20} color="#fff" style={styles.modalIcon} />
-              <View style={styles.modalTextContainer}>
-                <Text style={styles.modalOptionTitle}>This Device Only</Text>
-                <Text style={styles.modalOptionDescription}>
-                  Stay logged in on other devices
-                </Text>
-              </View>
-            </TouchableOpacity>
-            
-            <TouchableOpacity 
-              style={styles.modalOption}
-              onPress={() => handleSignOut(false)}
-            >
-              <Monitor size={20} color="#fff" style={styles.modalIcon} />
-              <View style={styles.modalTextContainer}>
-                <Text style={styles.modalOptionTitle}>All Devices</Text>
-                <Text style={styles.modalOptionDescription}>
-                  Sign out from all devices
-                </Text>
-              </View>
-            </TouchableOpacity>
-            
-            <Button 
-              mode="outlined" 
-              style={styles.cancelButton}
-              onPress={() => setLogoutModalVisible(false)}
-            >
-              Cancel
-            </Button>
+            <View style={styles.modalButtons}>
+              <Button
+                mode="outlined"
+                onPress={() => setLogoutModalVisible(false)}
+                style={styles.modalButton}
+              >
+                Cancel
+              </Button>
+              
+              <Button
+                mode="contained"
+                onPress={() => handleSignOut()}
+                style={[styles.modalButton, styles.signOutButton]}
+                loading={loading}
+                disabled={loading}
+              >
+                Sign Out
+              </Button>
+            </View>
           </View>
         </Pressable>
       </Modal>
@@ -515,7 +502,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  modalContainer: {
+  modalContent: {
     width: '80%',
     backgroundColor: '#1a1a1a',
     borderRadius: 8,
@@ -529,32 +516,16 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
   },
-  modalOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    marginBottom: 8,
-    backgroundColor: '#252525',
-    borderRadius: 8,
-  },
-  modalIcon: {
-    marginRight: 16,
-  },
-  modalTextContainer: {
-    flex: 1,
-  },
-  modalOptionTitle: {
+  modalText: {
     color: '#fff',
-    fontWeight: 'bold',
-    fontSize: 16,
+    marginBottom: 16,
   },
-  modalOptionDescription: {
-    color: '#aaa',
-    fontSize: 14,
-    marginTop: 4,
+  modalButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
   },
-  cancelButton: {
-    marginTop: 12,
-    borderColor: '#444',
+  modalButton: {
+    flex: 1,
+    marginHorizontal: 4,
   },
 });

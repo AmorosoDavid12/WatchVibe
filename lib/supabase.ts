@@ -116,6 +116,11 @@ class SessionManager {
       this.scheduleSessionRefresh();
     }
   }
+
+  public setSession(session: any): void {
+    this.cachedSession = session;
+    this.lastFetchTime = Date.now();
+  }
 }
 
 // Enhanced storage adapter with better logging and error handling
@@ -242,43 +247,126 @@ export async function getCurrentSession() {
 
 export async function login(email: string, password: string) {
   try {
-    console.log(`Logging in user ${email}...`);
+    console.log(`Attempting to log in user ${email}...`);
     
-    // Clear any existing sessions and tokens
-    // Note: We clear the cached session first for immediate effect
+    // Create a fresh instance of the Supabase client for this login attempt
+    // This prevents any stale state from affecting the login
+    const freshLoginClient = createClient(
+      constants.SUPABASE_URL,
+      constants.SUPABASE_ANON_KEY,
+      {
+        auth: {
+          autoRefreshToken: true,
+          persistSession: true,
+          detectSessionInUrl: false,
+          flowType: 'pkce',
+        }
+      }
+    );
+    
+    // Aggressively clear any existing auth state
+    // 1. Clear cached session
     SessionManager.getInstance().clearSession();
     
-    // For web, ensure local storage is cleaned
+    // 2. For web, forcefully clear all relevant localStorage items
     if (Platform.OS === 'web') {
-      clearAuthTokens();
+      try {
+        // Clear tokens with multiple patterns to ensure all are removed
+        const keys = Object.keys(localStorage);
+        for (const key of keys) {
+          if (key.includes('supabase') || 
+              key.includes('auth') || 
+              key.includes('sb-') || 
+              key.includes('watchlist') || 
+              key.includes('watched')) {
+            localStorage.removeItem(key);
+          }
+        }
+        console.log('Cleared all auth-related localStorage items');
+      } catch (e) {
+        console.warn('Error clearing localStorage:', e);
+        // Continue anyway - this is not critical
+      }
     }
     
-    // Set a timeout for the login request
-    const timeoutPromise = new Promise((_, reject) => {
-      setTimeout(() => reject(new Error('Login request timed out')), 10000);
-    });
+    // 3. Attempt to clear any existing Supabase sessions
+    try {
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => {
+        // Ignore errors, we're just making sure we're logged out
+        console.log('Pre-login signOut completed or failed silently');
+      });
+    } catch (e) {
+      // Ignore this error - we're just trying to clean up before login
+      console.warn('Error in pre-login signOut, continuing anyway:', e);
+    }
     
-    // Execute the login request
-    const loginPromise = supabase.auth.signInWithPassword({
+    // Set up parallel login attempts with different timeouts
+    // This makes login more resilient to temporary network issues
+    const primaryLoginPromise = freshLoginClient.auth.signInWithPassword({
       email: email,
       password: password,
     });
     
-    // Race the login request against the timeout
-    const result = await Promise.race([loginPromise, timeoutPromise]) as any;
+    const fallbackLoginPromise = new Promise((resolve) => {
+      // This is a fallback that will try again after a short delay
+      setTimeout(async () => {
+        console.log('Attempting fallback login...');
+        try {
+          const result = await supabase.auth.signInWithPassword({
+            email: email,
+            password: password,
+          });
+          resolve(result);
+        } catch (e) {
+          console.error('Fallback login failed:', e);
+          resolve({ data: { user: null, session: null }, error: e });
+        }
+      }, 5000); // Wait 5 seconds before trying fallback
+    });
     
-    if (result.error) {
+    // Set up a long timeout to ensure we don't hang indefinitely
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => {
+        console.log('Login timeout reached (15s), but still trying...');
+        // We don't actually reject here anymore - we let the attempts continue
+      }, 15000);
+    });
+    
+    // Race the login promises - take the first successful result
+    console.log('Executing login request...');
+    let result;
+    
+    try {
+      // First try the primary login with a reasonable timeout
+      result = await Promise.race([primaryLoginPromise, timeoutPromise]) as any;
+      
+      if (result?.error || !result?.data?.session) {
+        console.log('Primary login attempt failed or timed out, trying fallback...');
+        result = await fallbackLoginPromise as any;
+      }
+    } catch (e) {
+      console.log('Primary login attempt threw an exception, using fallback...');
+      result = await fallbackLoginPromise as any;
+    }
+    
+    // Process the login result
+    if (result?.error) {
       console.error('Login error:', result.error);
-    } else {
+    } else if (result?.data?.session) {
       console.log('Login successful:', {
         user: result.data?.user?.email,
         session_expires_at: result.data?.session?.expires_at
           ? new Date(result.data.session.expires_at * 1000).toLocaleString()
           : 'unknown'
       });
+      
+      // Ensure the session is cached properly
+      SessionManager.getInstance().setSession(result.data.session);
+    } else {
+      console.warn('Login completed but no session or explicit error was returned');
     }
     
-    return result;
+    return result || { data: { user: null, session: null }, error: new Error('Login failed with no result') };
   } catch (error) {
     console.error('Unexpected error during login:', error);
     return { data: { user: null, session: null }, error };

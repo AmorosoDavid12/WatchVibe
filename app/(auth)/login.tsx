@@ -78,13 +78,20 @@ export default function LoginScreen() {
       // Add a small delay to ensure cleanup completes
       await new Promise(resolve => setTimeout(resolve, 300));
       
+      console.log('Starting login process...');
       const { error } = await login(email, password);
       
       if (error) {
         console.error('Login error:', error);
-        setError(typeof error === 'object' && error !== null ? 
-          (error as any).message || 'Failed to login' : 
-          'Failed to login');
+        
+        // Handle timeout specifically with a more helpful message
+        if (error.message?.includes('timeout') || error.message?.includes('timed out')) {
+          setError('Login is taking longer than expected. Please try again.');
+        } else {
+          setError(typeof error === 'object' && error !== null ? 
+            (error as any).message || 'Failed to login' : 
+            'Failed to login');
+        }
         setLoading(false);
       } else {
         console.log('Login successful, redirecting...');
@@ -97,7 +104,7 @@ export default function LoginScreen() {
       }
     } catch (error: any) {
       console.error('Login exception:', error);
-      setError('An unexpected error occurred');
+      setError('An unexpected error occurred. Please try again in a moment.');
       setLoading(false);
     }
   };
