@@ -228,18 +228,19 @@ export default function ProfileScreen() {
       setLoading(true);
       setLogoutModalVisible(false);
       
-      // Force navigation to login page immediately, don't wait for logout to complete
-      router.replace('/login');
+      // Complete the logout process BEFORE navigation
+      console.log('Starting logout process...');
+      await logout(currentDeviceOnly);
       
-      // Then perform logout in the background
-      // The logout function has been improved to not get stuck and to clean up localStorage
-      await logout(currentDeviceOnly).catch(error => {
-        console.error('Error in logout (background):', error);
-        // Errors are already handled in the logout function
-      });
+      // After logout is complete, navigate to login
+      console.log('Logout complete, navigating to login screen');
+      router.replace('/login');
     } catch (error) {
       console.error('Error signing out:', error);
-      // No need to navigate here as we already did it at the beginning
+      // Even if there's an error, still navigate to login
+      router.replace('/login');
+    } finally {
+      setLoading(false);
     }
   }
 

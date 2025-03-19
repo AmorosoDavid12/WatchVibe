@@ -75,6 +75,9 @@ export default function LoginScreen() {
       // Clear all tokens before attempting login
       clearAuthTokens();
       
+      // Add a small delay to ensure cleanup completes
+      await new Promise(resolve => setTimeout(resolve, 300));
+      
       const { error } = await login(email, password);
       
       if (error) {
@@ -85,7 +88,12 @@ export default function LoginScreen() {
         setLoading(false);
       } else {
         console.log('Login successful, redirecting...');
-        router.replace('/(tabs)');
+        
+        // Add a small delay before redirect to ensure session is properly established
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Use router.push instead of replace to prevent navigation history issues
+        router.push('/(tabs)');
       }
     } catch (error: any) {
       console.error('Login exception:', error);

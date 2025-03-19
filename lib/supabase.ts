@@ -67,9 +67,23 @@ class SessionManager {
     console.log('Clearing cached session');
     this.cachedSession = null;
     this.lastFetchTime = 0;
+    this.sessionPromise = null;
+    
+    // Clear any scheduled session refresh
     if (this.sessionRefreshTimeout) {
       clearTimeout(this.sessionRefreshTimeout);
       this.sessionRefreshTimeout = null;
+    }
+    
+    // For web, clear localStorage directly for immediate effect
+    if (Platform.OS === 'web') {
+      try {
+        localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token');
+        localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier');
+        localStorage.removeItem('supabase.auth.token');
+      } catch (e) {
+        console.error('Error clearing localStorage:', e);
+      }
     }
   }
   
@@ -159,7 +173,11 @@ export const supabase = createClient(
       autoRefreshToken: true,
       persistSession: true,
       detectSessionInUrl: false,
+      // PKCE auth flow for more secure token exchange
       flowType: 'pkce',
+      // Shorter session expiry for testing (30 minutes)
+      // Remove this in production for the default 1 week expiry
+      // sessionTime: 30 * 60, // 30 minutes
     },
     // Add global fetch parameters to help with CORS and auth
     global: {
@@ -226,19 +244,28 @@ export async function login(email: string, password: string) {
   try {
     console.log(`Logging in user ${email}...`);
     
-    // First, clear any existing session if there is one
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token');
-      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier');
-    }
-    
-    // Clear any cached session
+    // Clear any existing sessions and tokens
+    // Note: We clear the cached session first for immediate effect
     SessionManager.getInstance().clearSession();
     
-    const result = await supabase.auth.signInWithPassword({
+    // For web, ensure local storage is cleaned
+    if (Platform.OS === 'web') {
+      clearAuthTokens();
+    }
+    
+    // Set a timeout for the login request
+    const timeoutPromise = new Promise((_, reject) => {
+      setTimeout(() => reject(new Error('Login request timed out')), 10000);
+    });
+    
+    // Execute the login request
+    const loginPromise = supabase.auth.signInWithPassword({
       email: email,
       password: password,
     });
+    
+    // Race the login request against the timeout
+    const result = await Promise.race([loginPromise, timeoutPromise]) as any;
     
     if (result.error) {
       console.error('Login error:', result.error);
@@ -264,23 +291,42 @@ export async function login(email: string, password: string) {
  */
 export const logout = async (currentDeviceOnly: boolean = false): Promise<void> => {
   try {
-    console.log('Logging out user...');
+    console.log(`Logging out (scope: ${currentDeviceOnly ? 'local' : 'global'})...`);
     
-    // Clear cached session first for immediate UI response
+    // First, clear the cached session to prevent reuse
     SessionManager.getInstance().clearSession();
     
-    // Sign out with the specified scope
-    const scope = currentDeviceOnly ? 'local' : 'global';
-    await supabase.auth.signOut({ scope });
+    // For web platforms, manually clear localStorage tokens
+    if (Platform.OS === 'web') {
+      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token');
+      localStorage.removeItem('sb-gihofdmqjwgkotwxdxms-auth-token-code-verifier');
+      localStorage.removeItem('supabase.auth.token');
+      localStorage.removeItem('loggingOut');
+    }
     
-    console.log(`User signed out successfully (scope: ${scope})`);
+    // Ensure we have a timeout so the function doesn't hang indefinitely
+    const timeoutPromise = new Promise<void>(resolve => {
+      setTimeout(() => {
+        console.log('Logout API call timed out, continuing with local logout');
+        resolve();
+      }, 3000);
+    });
     
-    // Clean up any lingering data
-    return Promise.resolve();
+    // Call Supabase signOut with appropriate scope
+    const signOutPromise = supabase.auth.signOut({
+      scope: currentDeviceOnly ? 'local' : 'global'
+    }).then(() => {
+      console.log('Supabase signOut completed successfully');
+    }).catch(error => {
+      console.error('Error during Supabase signOut:', error);
+    });
+    
+    // Wait for signOut or timeout, whichever comes first
+    await Promise.race([signOutPromise, timeoutPromise]);
+    
+    console.log('Logout completed');
   } catch (error) {
     console.error('Error in logout:', error);
-    // Even if there's an error, we want to clear the UI state
-    return Promise.resolve();
   }
 };
 
