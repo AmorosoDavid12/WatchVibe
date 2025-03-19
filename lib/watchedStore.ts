@@ -17,6 +17,8 @@ interface WatchedState {
   items: WatchedItem[];
   isLoading: boolean;
   isInitialized: boolean;
+  syncInProgress: boolean;
+  lastSyncTime: number;
   addItem: (item: WatchedItem) => boolean;
   removeItem: (id: number) => void;
   reorderItems: (items: WatchedItem[]) => void;
@@ -26,6 +28,7 @@ interface WatchedState {
 
 // Use the same table as watchlist but with a different type
 const TABLE_NAME = 'user_items';
+const MIN_SYNC_INTERVAL = 10000; // 10 seconds minimum between syncs
 
 export const useWatchedStore = create<WatchedState>()(
   persist(
@@ -33,6 +36,8 @@ export const useWatchedStore = create<WatchedState>()(
       items: [],
       isLoading: false,
       isInitialized: false,
+      syncInProgress: false,
+      lastSyncTime: 0,
       addItem: (item: WatchedItem) => {
         // First update local state immediately for UI responsiveness
         const exists = get().hasItem(item.id);
@@ -143,26 +148,46 @@ export const useWatchedStore = create<WatchedState>()(
         return get().items.some((item) => item.id === id);
       },
       syncWithSupabase: async () => {
+        // First check if we are already syncing or synced recently
+        const state = get();
+        const now = Date.now();
+        
+        if (state.syncInProgress) {
+          console.log('Watched sync already in progress, skipping');
+          return false;
+        }
+        
+        // Prevent excessive syncing
+        if (now - state.lastSyncTime < MIN_SYNC_INTERVAL && state.isInitialized) {
+          console.log('Watched list synced recently, skipping');
+          return true;
+        }
+        
         try {
-          // Set loading state to true at the beginning of sync
-          set({ isLoading: true });
+          // Set loading and sync in progress state
+          set({ isLoading: true, syncInProgress: true });
           
           // Check for an authenticated session
           const session = await getCurrentSession();
           if (!session?.user) {
             console.log('No authenticated user found, skipping Supabase sync');
-            set({ isLoading: false, isInitialized: true });
+            set({ 
+              isLoading: false, 
+              isInitialized: true,
+              syncInProgress: false,
+              lastSyncTime: now
+            });
             return false;
           }
 
           console.log('Syncing watched list with Supabase');
           
-          // Create a timeout promise
+          // Create a timeout promise - increased to 8 seconds
           const timeoutPromise = new Promise((resolve) => 
             setTimeout(() => {
               console.log('Watched list sync timed out');
               resolve({ data: null, error: new Error('Timeout') });
-            }, 5000)
+            }, 8000)
           );
           
           // Fetch data from Supabase with timeout
@@ -180,13 +205,25 @@ export const useWatchedStore = create<WatchedState>()(
           
           if (error) {
             console.error('Error fetching watched items:', error);
-            set({ isLoading: false, isInitialized: true });
+            set({ 
+              isLoading: false, 
+              isInitialized: true,
+              syncInProgress: false,
+              lastSyncTime: now
+            });
             return false;
           }
           
+          // If we get no data (but no error either), keep existing items to prevent flickering
+          // This is common when connection issues occur but isn't a critical failure
           if (!data || data.length === 0) {
-            console.log('No watched data received');
-            set({ isLoading: false, isInitialized: true });
+            console.log('No watched data received, maintaining existing items');
+            set({ 
+              isLoading: false, 
+              isInitialized: true,
+              syncInProgress: false,
+              lastSyncTime: now
+            });
             return true; // No data is not an error
           }
 
@@ -202,14 +239,25 @@ export const useWatchedStore = create<WatchedState>()(
             }
           }).filter(Boolean); // Remove null items
           
-          // Set the loading state to false and update items
-          set({ items, isLoading: false, isInitialized: true });
+          // Set the updated state
+          set({ 
+            items, 
+            isLoading: false, 
+            isInitialized: true,
+            syncInProgress: false,
+            lastSyncTime: now
+          });
           
           return true;
         } catch (error) {
           console.error('Error syncing watched list:', error);
-          // Make sure to set loading to false even in error cases
-          set({ isLoading: false, isInitialized: true });
+          // Make sure to set loading to false and update lastSyncTime even in error cases
+          set({ 
+            isLoading: false, 
+            isInitialized: true,
+            syncInProgress: false,
+            lastSyncTime: now
+          });
           return false;
         }
       }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useRouter, useSegments } from 'expo-router';
 import { supabase, getCurrentSession } from '@/lib/supabase';
 import { useWatchlistStore } from '@/lib/watchlistStore';
@@ -25,14 +25,30 @@ export default function useAuth() {
   const router = useRouter();
   const [isRouterReady, setIsRouterReady] = useState(false);
   
+  // Track last sync time to prevent excessive sync calls
+  const lastSyncTimeRef = useRef<number>(0);
+  const MIN_SYNC_INTERVAL = 10000; // 10 seconds minimum between syncs
+  
+  // Keep reference to active subscription
+  const authSubscriptionRef = useRef<{ unsubscribe: () => void } | null>(null);
+  
   // Get the sync functions from stores
   const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
   const syncWatched = useWatchedStore(state => state.syncWithSupabase);
 
-  // Function to sync all data
-  const syncAllData = async () => {
+  // Function to sync all data with throttling
+  const syncAllData = async (force = false) => {
     try {
+      const now = Date.now();
+      // Skip if we've synced recently, unless force=true
+      if (!force && now - lastSyncTimeRef.current < MIN_SYNC_INTERVAL) {
+        console.log('Skipping sync - too soon since last sync');
+        return true;
+      }
+      
       console.log('Starting data synchronization');
+      lastSyncTimeRef.current = now;
+      
       // Create a promise that rejects after a timeout to avoid getting stuck
       const timeoutPromise = new Promise((_, reject) => {
         setTimeout(() => reject(new Error('Data sync timeout')), 8000); // Increased to 8 seconds
@@ -226,11 +242,11 @@ export default function useAuth() {
           const isLoggedInState = !isRecoverySession;
           setIsLoggedIn(isLoggedInState);
           
-          // If logged in and not in recovery, sync data
+          // If logged in and not in recovery, sync data (once) on initial load
           if (isLoggedInState) {
             try {
               // Don't await here - prevent blocking the auth flow
-              syncAllData().catch(error => {
+              syncAllData(true).catch(error => {
                 console.error('Background sync error:', error);
               });
             } catch (syncError) {
@@ -272,6 +288,11 @@ export default function useAuth() {
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         console.log('Auth state changed:', event, 'Is recovery session:', localStorage.getItem('isRecoverySession'));
+        
+        // Store the subscription for cleanup
+        if (subscription && !authSubscriptionRef.current) {
+          authSubscriptionRef.current = subscription;
+        }
         
         // Skip if router not ready to prevent navigation errors
         if (!isRouterReady) {
@@ -337,10 +358,11 @@ export default function useAuth() {
             console.log('User logged in, session present');
             setIsLoggedIn(true);
             
-            // Only sync data if the user is logged in
+            // Only sync data if this is a new sign in event
+            // and not triggered by other auth state changes
             if (event === 'SIGNED_IN') {
               console.log('User signed in, syncing data');
-              syncAllData();
+              syncAllData(true); // Force sync on sign in
             }
           } else {
             console.log('User logged out, no session');
@@ -358,7 +380,14 @@ export default function useAuth() {
       if (navigationDebounceTimer) {
         clearTimeout(navigationDebounceTimer);
       }
-      subscription?.unsubscribe();
+      
+      // Properly unsubscribe from auth state changes
+      if (authSubscriptionRef.current) {
+        authSubscriptionRef.current.unsubscribe();
+        authSubscriptionRef.current = null;
+      } else if (subscription) {
+        subscription.unsubscribe();
+      }
     };
   }, [router, segments, isRouterReady, syncWatchlist, syncWatched]);
 

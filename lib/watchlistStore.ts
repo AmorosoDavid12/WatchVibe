@@ -15,12 +15,17 @@ interface WatchlistState {
   items: WatchlistItem[];
   isLoading: boolean;
   isInitialized: boolean;
+  syncInProgress: boolean;
+  lastSyncTime: number;
   addItem: (item: WatchlistItem) => Promise<boolean>;
   removeItem: (id: number) => Promise<boolean>;
   reorderItems: (items: WatchlistItem[]) => void;
   hasItem: (id: number) => boolean;
   syncWithSupabase: () => Promise<boolean>;
 }
+
+// Minimum time between syncs to prevent excessive API calls
+const MIN_SYNC_INTERVAL = 10000; // 10 seconds
 
 // Create a store with server-first approach
 export const useWatchlistStore = create<WatchlistState>()(
@@ -29,6 +34,8 @@ export const useWatchlistStore = create<WatchlistState>()(
       items: [],
       isLoading: false,
       isInitialized: false,
+      syncInProgress: false,
+      lastSyncTime: 0,
       
       // Add item with server-first approach
       addItem: async (item: WatchlistItem) => {
@@ -104,28 +111,70 @@ export const useWatchlistStore = create<WatchlistState>()(
       
       // Sync with Supabase - always fetch from server
       syncWithSupabase: async () => {
-        set({ isLoading: true });
+        // First check if we are already syncing or synced recently
+        const state = get();
+        const now = Date.now();
+        
+        if (state.syncInProgress) {
+          console.log('Watchlist sync already in progress, skipping');
+          return false;
+        }
+        
+        // Prevent excessive syncing
+        if (now - state.lastSyncTime < MIN_SYNC_INTERVAL && state.isInitialized) {
+          console.log('Watchlist synced recently, skipping');
+          return true;
+        }
+        
+        // Set loading and sync in progress state
+        set({ isLoading: true, syncInProgress: true });
         
         try {
           const session = await getCurrentSession();
           if (!session?.user) {
-            set({ isLoading: false, isInitialized: true });
+            set({ 
+              isLoading: false, 
+              isInitialized: true,
+              syncInProgress: false,
+              lastSyncTime: now
+            });
             return false;
           }
           
           // Fetch items from server with retry built into fetchUserItems
           const items = await fetchUserItems(session.user.id, 'watchlist');
           
+          // If we get an empty array but no error, keep existing items to prevent flickering
+          // Only update with empty array on the initial sync
+          if (items.length === 0 && state.isInitialized && state.items.length > 0) {
+            console.log('No watchlist data received, maintaining existing items');
+            set({ 
+              isLoading: false, 
+              isInitialized: true,
+              syncInProgress: false,
+              lastSyncTime: now
+            });
+            return true;
+          }
+          
           // Update state with fetched items
           set({ 
             items,
             isLoading: false,
-            isInitialized: true
+            isInitialized: true,
+            syncInProgress: false,
+            lastSyncTime: now
           });
           
           return true;
         } catch (error) {
-          set({ isLoading: false, isInitialized: true });
+          console.error('Error syncing watchlist:', error);
+          set({ 
+            isLoading: false, 
+            isInitialized: true,
+            syncInProgress: false,
+            lastSyncTime: now
+          });
           return false;
         }
       }
