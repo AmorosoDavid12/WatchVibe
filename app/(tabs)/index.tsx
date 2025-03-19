@@ -39,7 +39,7 @@ const showToast = (message: string, type: 'success' | 'error' | 'info' = 'succes
 };
 
 export default function WatchlistScreen() {
-  const { items, removeItem, isLoading: storeLoading, isInitialized, syncWithSupabase } = useWatchlistStore();
+  const { items, removeItem, isLoading: storeLoading, isInitialized, syncWithSupabase, addItem } = useWatchlistStore();
   const { addItem: addToWatched } = useWatchedStore();
   const router = useRouter();
   const [activeFilter, setActiveFilter] = useState('All');
@@ -52,38 +52,30 @@ export default function WatchlistScreen() {
   // Initial data loading
   useEffect(() => {
     const loadData = async () => {
-      console.log('Initial watchlist sync');
       await syncWithSupabase();
     };
     
-    // Only sync if not already initialized to avoid double loading
-    if (!isInitialized) {
-      loadData();
-    }
-  }, [syncWithSupabase, isInitialized]);
+    loadData();
+  }, [syncWithSupabase]);
 
   // Sync with Supabase when the tab is focused
   useFocusEffect(
     useCallback(() => {
-      const currentTime = Date.now();
-      // Only sync if more than 10 seconds have passed since last sync
-      // This prevents excessive API calls when quickly switching tabs
-      if (currentTime - lastSyncTime > 10000) {
-        console.log('Tab focused, syncing watchlist with Supabase');
-        syncWithSupabase();
-        setLastSyncTime(currentTime);
-      } else {
-        console.log('Skipping sync due to recent sync');
-      }
+      const syncData = async () => {
+        await syncWithSupabase();
+        setLastSyncTime(Date.now());
+      };
+      
+      // Always sync when tab is focused for server-first approach
+      syncData();
       
       return () => {
         // Cleanup if needed when unfocusing
       };
-    }, [syncWithSupabase, lastSyncTime])
+    }, [syncWithSupabase])
   );
 
   useEffect(() => {
-    // Don't try to process items until store is initialized
     if (!isInitialized) return;
     
     // Make a copy of items to enrich with additional details
@@ -132,16 +124,26 @@ export default function WatchlistScreen() {
     }
   };
 
-  const handleRemove = (item: WatchlistItem) => {
-    removeItem(item.id);
-    showToast(`"${item.title}" removed from watchlist`);
+  const handleRemove = async (item: WatchlistItem) => {
+    const success = await removeItem(item.id);
+    if (success) {
+      showToast(`"${item.title}" removed from watchlist`);
+    } else {
+      showToast(`Failed to remove "${item.title}"`, 'error');
+    }
     setMenuVisible(false);
   };
 
-  const handleMarkWatched = (item: WatchlistItem) => {
-    addToWatched(item);
-    removeItem(item.id);
-    showToast(`"${item.title}" marked as watched`);
+  const handleMarkWatched = async (item: WatchlistItem) => {
+    const success = await addToWatched(item);
+    
+    if (success) {
+      await removeItem(item.id);
+      showToast(`"${item.title}" marked as watched`);
+    } else {
+      showToast(`Failed to mark "${item.title}" as watched`, 'error');
+    }
+    
     setMenuVisible(false);
   };
 

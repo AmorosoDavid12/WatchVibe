@@ -10,10 +10,9 @@ import {
   Pressable,
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { supabase, getCurrentSession, verifyAuthState } from '@/lib/supabase';
+import { supabase, getCurrentSession, verifyAuthState, fetchUserItems, logout } from '@/lib/supabase';
 import { Settings, LogOut, Star, Smartphone, Monitor } from 'lucide-react-native';
 import { Text, Button, Card, Avatar, ActivityIndicator, Divider, Surface } from 'react-native-paper';
-import { logout } from '@/lib/supabase';
 
 interface WatchedItem {
   rating?: number;
@@ -34,7 +33,6 @@ export default function ProfileScreen() {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [fetchRetryCount, setFetchRetryCount] = useState(0);
   const [stats, setStats] = useState({
     totalWatched: 0,
     avgRating: 0,
@@ -42,184 +40,79 @@ export default function ProfileScreen() {
   });
   const [logoutModalVisible, setLogoutModalVisible] = useState(false);
 
-  // Use an additional state to track if the component is mounted
-  const [isMounted, setIsMounted] = useState(true);
-
   useEffect(() => {
-    // Set mounted flag
-    setIsMounted(true);
-    
-    const initializeProfile = async () => {
-      // Verify auth state first - this will refresh the token if needed
-      const isAuthenticated = await verifyAuthState();
+    const loadProfile = async () => {
+      setLoading(true);
+      setError(null);
       
-      if (!isAuthenticated) {
-        console.log('Auth verification failed, redirecting to login');
-        router.replace('/login');
-        return;
-      }
-      
-      // For debugging: check if the user_items table exists
-      checkTableStructure();
-      
-      // Load profile data with retry mechanism
-      loadProfileData();
-    };
-    
-    initializeProfile();
-
-    // Cleanup function to prevent state updates after unmount
-    return () => {
-      setIsMounted(false);
-    };
-  }, []);
-
-  const checkTableStructure = async () => {
-    try {
-      console.log('Checking table structure...');
-      const { data, error } = await supabase
-        .from('user_items')
-        .select('*')
-        .limit(1);
-      
-      if (error) {
-        console.error('Error checking table structure:', error);
-      } else {
-        console.log('Table exists, sample data:', data);
-      }
-    } catch (err) {
-      console.error('Failed to check table structure:', err);
-    }
-  };
-  
-  const loadProfileData = async () => {
-    // Set a timeout for the entire loading process
-    const timeout = setTimeout(() => {
-      if (isMounted && loading) {
-        console.log('Profile data loading timed out');
-        
-        if (fetchRetryCount < MAX_RETRIES) {
-          console.log(`Retrying profile data load (${fetchRetryCount + 1}/${MAX_RETRIES})`);
-          setFetchRetryCount(prev => prev + 1);
-          loadProfileData();
-        } else {
-          setLoading(false);
-          setError('Loading timed out. Please try again.');
+      try {
+        // Verify auth first
+        const isAuthenticated = await verifyAuthState();
+        if (!isAuthenticated) {
+          router.replace('/login');
+          return;
         }
-      }
-    }, 8000);
-
-    try {
-      // Run both fetch operations in parallel
-      await Promise.all([
-        fetchProfile(),
-        fetchStats()
-      ]);
-      
-      // Only update state if component is still mounted
-      if (isMounted) {
+        
+        // Load profile and stats in parallel
+        await Promise.all([
+          fetchProfile(),
+          fetchStats()
+        ]);
+        
+        setLoading(false);
+      } catch (err) {
+        console.error('Error loading profile:', err);
+        setError('Failed to load profile data');
         setLoading(false);
       }
-    } catch (error) {
-      console.error('Error loading profile data:', error);
-      // Only update state if component is still mounted
-      if (isMounted) {
-        // Try one more time if we haven't reached max retries
-        if (fetchRetryCount < MAX_RETRIES) {
-          console.log(`Error occurred, retrying profile load (${fetchRetryCount + 1}/${MAX_RETRIES})`);
-          setFetchRetryCount(prev => prev + 1);
-          setTimeout(loadProfileData, 1000); // Wait 1 second before retrying
-        } else {
-          setError('Failed to load profile data');
-          setLoading(false);
-        }
-      }
-    } finally {
-      clearTimeout(timeout);
-    }
-  };
+    };
+    
+    loadProfile();
+  }, []);
 
   async function fetchProfile() {
-    try {
-      console.log('Fetching user profile data');
-      // Use our enhanced getCurrentSession instead of direct Supabase call
-      const session = await getCurrentSession();
-      
-      if (session?.user && isMounted) {
-        const user = session.user;
-        // Get user data directly from auth session
-        setProfile({
-          id: user.id,
-          email: user.email,
-          username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
-          avatar_url: user.user_metadata?.avatar_url
-        });
-        console.log('Profile data loaded successfully');
-      } else {
-        throw new Error('No authenticated user found');
-      }
-    } catch (error) {
-      console.error('Error fetching profile:', error);
-      throw error; // Propagate the error to the parent promise
+    const session = await getCurrentSession();
+    
+    if (!session?.user) {
+      throw new Error('No authenticated user');
     }
+    
+    const user = session.user;
+    setProfile({
+      id: user.id,
+      email: user.email,
+      username: user.user_metadata?.username || user.email?.split('@')[0] || 'User',
+      avatar_url: user.user_metadata?.avatar_url
+    });
   }
 
   async function fetchStats() {
+    const session = await getCurrentSession();
+    
+    if (!session?.user) {
+      return;
+    }
+    
     try {
-      console.log('Fetching user stats');
-      const session = await getCurrentSession();
+      // Use fetchUserItems from supabase.ts
+      const watchedItems = await fetchUserItems(session.user.id, 'watched');
       
-      if (!session?.user) {
-        console.log('No authenticated user found for stats');
-        return;
-      }
-      
-      // Add a race with timeout to prevent hanging
-      const statsPromise = supabase
-        .from('user_items')
-        .select('*')
-        .eq('user_id', session.user.id)
-        .eq('type', 'watched');
-      
-      const timeoutPromise = new Promise((_, reject) => 
-        setTimeout(() => reject(new Error('Stats query timed out')), 5000)
-      );
-      
-      const { data: watched, error } = await Promise.race([
-        statsPromise,
-        timeoutPromise
-      ]) as any;
-
-      if (error) {
-        console.error('Error fetching stats:', error);
-        return;
-      }
-
-      if (watched && watched.length > 0 && isMounted) {
-        const parsedWatched = watched.map((item: any) => {
-          try {
-            return JSON.parse(item.value);
-          } catch (e) {
-            console.error('Error parsing watched item:', e);
-            return null;
-          }
-        }).filter(Boolean);
-
-        const totalWatched = parsedWatched.length;
-        const avgRating = parsedWatched.reduce((acc: number, curr: WatchedItem) => acc + (curr.rating || 0), 0) / (totalWatched || 1);
-        const watchTime = parsedWatched.reduce((acc: number, curr: WatchedItem) => acc + (curr.duration || 0), 0);
+      if (watchedItems && watchedItems.length > 0) {
+        const totalWatched = watchedItems.length;
+        const avgRating = watchedItems.reduce((acc: number, curr: WatchedItem) => 
+          acc + (curr.rating || 0), 0) / (totalWatched || 1);
+        const watchTime = watchedItems.reduce((acc: number, curr: WatchedItem) => 
+          acc + (curr.duration || 0), 0);
 
         setStats({
           totalWatched,
           avgRating: Math.round(avgRating * 10) / 10 || 0,
           watchTime: Math.round(watchTime / 60) || 0, // Convert to hours
         });
-        console.log('Stats loaded successfully');
       }
-    } catch (error) {
-      console.error('Error fetching stats:', error);
-      // Don't propagate stats errors, they're non-critical
-      // But we'll still show data that we have
+    } catch (err) {
+      console.error('Error fetching stats:', err);
+      // Non-critical, continue without stats
     }
   }
 
@@ -228,16 +121,10 @@ export default function ProfileScreen() {
       setLoading(true);
       setLogoutModalVisible(false);
       
-      // Complete the logout process BEFORE navigation
-      console.log('Starting logout process...');
-      await logout(false); // Always use current device only
-      
-      // After logout is complete, navigate to login
-      console.log('Logout complete, navigating to login screen');
+      await logout();
       router.replace('/login');
     } catch (error) {
       console.error('Error signing out:', error);
-      // Even if there's an error, still navigate to login
       router.replace('/login');
     } finally {
       setLoading(false);
@@ -247,32 +134,33 @@ export default function ProfileScreen() {
   const handleRetry = () => {
     setError(null);
     setLoading(true);
-    setFetchRetryCount(0);
-    loadProfileData();
+    loadProfile();
   };
+
+  // Function to load profile and stats
+  async function loadProfile() {
+    try {
+      await Promise.all([
+        fetchProfile(),
+        fetchStats()
+      ]);
+      
+      setLoading(false);
+      setError(null);
+    } catch (err) {
+      console.error('Error retrying profile load:', err);
+      setError('Failed to load profile data');
+      setLoading(false);
+    }
+  }
 
   if (loading) {
     return (
       <View style={[styles.container, styles.centered]}>
         <ActivityIndicator animating={true} size="large" color="#e21f70" />
         <Text style={styles.loadingText}>
-          {fetchRetryCount > 0 ? `Loading profile... (Attempt ${fetchRetryCount + 1})` : 'Loading profile...'}
+          {error ? error : 'Loading profile...'}
         </Text>
-      </View>
-    );
-  }
-
-  if (error) {
-    return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={styles.errorText}>{error}</Text>
-        <Button 
-          mode="contained" 
-          onPress={handleRetry}
-          style={styles.retryButton}
-        >
-          Retry
-        </Button>
       </View>
     );
   }
