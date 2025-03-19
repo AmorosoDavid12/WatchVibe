@@ -41,7 +41,7 @@ const AuthStorage = {
   },
 };
 
-// Create a fresh Supabase client
+// Create a fresh Supabase client with proper headers
 export const createFreshClient = () => {
   return createClient(
     constants.SUPABASE_URL,
@@ -55,11 +55,29 @@ export const createFreshClient = () => {
         flowType: 'pkce',
       },
       global: {
+        headers: {
+          'apikey': constants.SUPABASE_ANON_KEY,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         fetch: async (...args: any[]) => {
           // Add retry logic with exponential backoff
           const [url, options = {}] = args;
           const maxRetries = 2;
           let lastError;
+          
+          // Ensure headers are properly set
+          if (!options.headers) {
+            options.headers = {};
+          }
+          
+          // Make sure apikey is always included
+          options.headers = {
+            ...options.headers,
+            'apikey': constants.SUPABASE_ANON_KEY,
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          };
           
           for (let i = 0; i <= maxRetries; i++) {
             try {
@@ -68,14 +86,7 @@ export const createFreshClient = () => {
                 await new Promise(r => setTimeout(r, Math.pow(2, i) * 500));
               }
               
-              return await fetch(url, {
-                ...options,
-                headers: {
-                  ...options.headers,
-                  'Accept': 'application/json',
-                  'Content-Type': 'application/json',
-                }
-              });
+              return await fetch(url, options);
             } catch (error) {
               lastError = error;
             }
@@ -250,15 +261,25 @@ export async function fetchUserItems(userId: string, type: 'watchlist' | 'watche
   if (!userId) return [];
   
   try {
-    const data = await fetchWithRetry(
-      'user_items',
-      supabase
-        .from('user_items')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('type', type)
-        .order('updated_at', { ascending: false })
-    );
+    // Get current session to ensure we have a valid access token
+    const session = await getCurrentSession();
+    if (!session) {
+      console.error('No valid session found for data fetch');
+      return [];
+    }
+    
+    // Create query with proper authorization
+    const query = supabase
+      .from('user_items')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('type', type)
+      .order('updated_at', { ascending: false });
+    
+    // Set authorization header for the request
+    supabase.auth.setSession(session);
+    
+    const data = await fetchWithRetry('user_items', query);
     
     // Parse the items from JSON
     return data.map((row: any) => {
@@ -283,13 +304,25 @@ export async function saveUserItem(
   if (!userId) return false;
   
   try {
-    const { error } = await supabase.from('user_items').upsert({
-      user_id: userId,
-      item_key: `${type}_${item.id}`,
-      value: JSON.stringify(item),
-      type,
-      updated_at: new Date().toISOString()
-    });
+    // Get current session to ensure we have a valid access token
+    const session = await getCurrentSession();
+    if (!session) {
+      console.error('No valid session found for data save');
+      return false;
+    }
+    
+    // Set authorization header for the request
+    supabase.auth.setSession(session);
+    
+    const { error } = await supabase
+      .from('user_items')
+      .upsert({
+        user_id: userId,
+        item_key: `${type}_${item.id}`,
+        value: JSON.stringify(item),
+        type,
+        updated_at: new Date().toISOString()
+      });
     
     return !error;
   } catch (error) {
@@ -307,6 +340,16 @@ export async function removeUserItem(
   if (!userId) return false;
   
   try {
+    // Get current session to ensure we have a valid access token
+    const session = await getCurrentSession();
+    if (!session) {
+      console.error('No valid session found for data removal');
+      return false;
+    }
+    
+    // Set authorization header for the request
+    supabase.auth.setSession(session);
+    
     const { error } = await supabase
       .from('user_items')
       .delete()
