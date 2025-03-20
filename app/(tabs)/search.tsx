@@ -488,16 +488,46 @@ export default function SearchScreen() {
             (item as any)._source = 'top_rated_tv_endpoint'; 
           });
           
-          // Filter for English language only and no animation
-          const englishNonAnimatedTVShows = topRatedTVShows.results.filter(item => {
-            const isEnglish = (item as any).original_language === 'en';
-            const isAnimation = item.genre_ids?.includes(16);
-            return isEnglish && !isAnimation;
+          // Get more TV show pages to have more options
+          const moreTVShows = await getTopRated('tv', 2);
+          moreTVShows.results.forEach(item => {
+            item.media_type = 'tv';
           });
           
-          // Directly use the filtered top_rated TV shows
-          highestRatedItems = [...englishNonAnimatedTVShows];
-          console.log('Using highestRatedItems from TV endpoint (English only):', highestRatedItems[0]); // Debug
+          // Get even more TV shows from a third page
+          const evenMoreTVShows = await getTopRated('tv', 3);
+          evenMoreTVShows.results.forEach(item => {
+            item.media_type = 'tv';
+          });
+          
+          // Combine all TV shows
+          const allTVShows = [
+            ...topRatedTVShows.results, 
+            ...moreTVShows.results,
+            ...evenMoreTVShows.results
+          ];
+          
+          // Filter but make language less restrictive - allow non-English popular shows
+          const filteredTVShows = allTVShows.filter(item => {
+            const isAnimation = item.genre_ids?.includes(16);
+            
+            // We're primarily interested in removing animation shows
+            // Keep any show regardless of language that has a vote average of 8.5+
+            if (item.vote_average >= 8.5) {
+              return !isAnimation; // For highly rated shows, only filter out animation
+            }
+            
+            // For regular shows, prefer English but don't require it
+            const isEnglish = (item as any).original_language === 'en';
+            return !isAnimation && (isEnglish || item.vote_average >= 8.0);
+          });
+          
+          // Sort by rating
+          const sortedTVShows = filteredTVShows.sort((a, b) => b.vote_average - a.vote_average);
+          
+          // Directly use the filtered TV shows
+          highestRatedItems = sortedTVShows;
+          console.log('Using highestRatedItems from TV endpoint (more pages):', highestRatedItems.length, 'items'); // Debug
         }
         else if (selectedCategory === 'anime') {
           // For anime, we need specialized filtering since there's no direct top_rated anime endpoint
@@ -1014,39 +1044,40 @@ export default function SearchScreen() {
           resizeMode={size === 'wide' ? 'cover' : 'cover'}
         />
         
-        {/* Media Type Indicator (Movie/TV) */}
-        {item.id !== spotlightItem?.id && (
-          <View style={styles.mediaTypeIndicator}>
-            {mediaType === 'movie' ? 
-              <Film size={12} color="#fff" /> : 
-              <Tv size={12} color="#fff" />
-            }
-            <Text style={styles.mediaTypeText}>
-              {mediaType === 'movie' ? 'Movie' : 'TV'}
-            </Text>
+        {/* Media Type Indicator (Movie/TV) - Show for all items now including highest rated */}
+        <View style={styles.mediaTypeIndicator}>
+          {mediaType === 'movie' ? 
+            <Film size={12} color="#fff" /> : 
+            <Tv size={12} color="#fff" />
+          }
+          <Text style={styles.mediaTypeText}>
+            {mediaType === 'movie' ? 'Movie' : 'TV'}
+          </Text>
+        </View>
+        
+        {/* For highest rated section, show rating with star in bottom left */}
+        {isInHighestRatedSection && rating ? (
+          <View style={styles.highestRatedBadge}>
+            <Star size={9} color="#FFD700" fill="#FFD700" />
+            <Text style={styles.highestRatedBadgeText}>{rating}</Text>
+          </View>
+        ) : null}
+        
+        {/* Media info overlay with fixed height - only for non-highest rated items */}
+        {!isInHighestRatedSection && (
+          <View style={[styles.mediaItemInfo, { maxHeight: 73 }]}>
+            <Text style={styles.mediaItemTitle} numberOfLines={1}>{title}</Text>
+            <View style={styles.mediaItemMetaColumn}>
+              <Text style={styles.mediaItemYear}>{yearText}</Text>
+              {rating ? (
+                <View style={styles.mediaItemRating}>
+                  <Star size={12} color="#FFD700" fill="#FFD700" />
+                  <Text style={styles.mediaItemRatingText}>{rating}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         )}
-        
-        {/* Media info overlay with fixed height */}
-        <View style={[styles.mediaItemInfo, { maxHeight: 73 }]}>
-          <Text style={styles.mediaItemTitle} numberOfLines={1}>{title}</Text>
-          <View style={styles.mediaItemMetaColumn}>
-            <Text style={styles.mediaItemYear}>{yearText}</Text>
-            {rating ? (
-              <View style={[
-                styles.mediaItemRating,
-                // Enhance the rating display for top rated items
-                isInHighestRatedSection && isHighRated && styles.enhancedRating
-              ]}>
-                <Star size={12} color="#FFD700" fill="#FFD700" />
-                <Text style={[
-                  styles.mediaItemRatingText,
-                  isInHighestRatedSection && isHighRated && { fontWeight: '700' }
-                ]}>{rating}</Text>
-              </View>
-            ) : null}
-          </View>
-        </View>
         
         {/* Action button - at top right with increased size (+25%) */}
         {inWatchlist ? (
@@ -1264,7 +1295,23 @@ export default function SearchScreen() {
       <View style={styles.sectionContainer}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{displayTitle}</Text>
-          <TouchableOpacity>
+          <TouchableOpacity 
+            onPress={() => {
+              // Navigate to appropriate highest rated page if it's the Highest Rated section
+              if (isHighestRated) {
+                if (selectedCategory === 'movies') {
+                  router.push('/search/Highest-Rated/movies' as any);
+                } else if (selectedCategory === 'tv') {
+                  router.push('/search/Highest-Rated/tv' as any);
+                } else if (selectedCategory === 'anime') {
+                  router.push('/search/Highest-Rated/anime' as any);
+                } else if (selectedCategory === 'documentaries') {
+                  router.push('/search/Highest-Rated/documentaries' as any);
+                }
+              }
+              // For other sections we could implement something else later
+            }}
+          >
             <Text style={styles.seeAllText}>See All</Text>
           </TouchableOpacity>
         </View>
@@ -1814,32 +1861,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 4,
   },
-  topRatedBadge: {
+  highestRatedBadge: {
     position: 'absolute',
-    top: 10,
-    left: 10,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
+    bottom: 8,
+    left: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#FFD700',
-    ...getElevation(3),
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
   },
-  topRatedBadgeText: {
+  highestRatedBadgeText: {
     color: '#FFD700',
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '700',
-    marginLeft: 4,
-  },
-  topRatedBadgeMediaType: {
-    color: '#ccc',
-    fontSize: 12,
-    fontWeight: '500',
-    marginLeft: 4,
+    marginLeft: 2,
   },
   highRatedItemBorder: {
     borderWidth: 2,
