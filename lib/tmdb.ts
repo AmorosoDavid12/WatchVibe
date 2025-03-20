@@ -500,7 +500,7 @@ export async function getHighestRated(
   return discoverContent(mediaType, {
     genreIds,
     sortBy: 'vote_average.desc',
-    voteCountGte: 100, // Ensure some minimum popularity
+    voteCountGte: 1000, // Increased from 100 to 1000 to ensure significant popularity
     voteAverageGte: 7.0, // Get high quality content
     page
   });

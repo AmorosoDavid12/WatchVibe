@@ -15,7 +15,7 @@ import {
   Platform,
 } from 'react-native';
 import { useWatchlistStore } from '../../lib/watchlistStore';
-import { searchContent, formatSearchResult, TMDbSearchResult, getTrending, getMovieDetails } from '../../lib/tmdb';
+import { searchContent, formatSearchResult, TMDbSearchResult, getTrending, getMovieDetails, discoverContent } from '../../lib/tmdb';
 import { Plus, Check, Film, Tv, Repeat, Search, Star } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { debounce } from 'lodash';
@@ -258,6 +258,14 @@ export default function SearchScreen() {
       const trendingResponse = await getTrending('day');
       let allTrendingItems = trendingResponse.results;
       
+      // Get user lists for filtering
+      const watchlistItems = useWatchlistStore.getState().items;
+      const watchedItems = useWatchedStore.getState().items;
+      const userItemIds = new Set([
+        ...watchlistItems.map((item: any) => item.id),
+        ...watchedItems.map((item: any) => item.id)
+      ]);
+      
       // Get additional content for anime and documentaries since they're less common in trending
       // Fetch more content for anime (animation genre)
       let animeItems: TMDbSearchResult[] = [];
@@ -265,7 +273,7 @@ export default function SearchScreen() {
       
       try {
         // Get animation content (genre_id 16 for animation)
-        const animeResponse = await searchContent('anime animation');
+        const animeResponse = await searchContent('anime animation japanese');
         animeItems = animeResponse.results.filter(item => 
           item.genre_ids?.includes(16) || 
           (item as any).original_language === 'ja'
@@ -336,13 +344,12 @@ export default function SearchScreen() {
         
         // Get recommendations (using trending weekly as recommendations)
         const recommendedResponse = await getTrending('week');
-        const allRecommendedItems = recommendedResponse.results
-          .filter(item => item.id !== movieSpotlight?.id);
+        
+        // Filter out items that are already in the user's watchlist or watched list
+        let allRecommendedItems = recommendedResponse.results
+          .filter(item => item.id !== movieSpotlight?.id && !userItemIds.has(item.id));
         
         // Get user preferences from watchlist and watched items
-        const watchlistItems = useWatchlistStore.getState().items;
-        const watchedItems = useWatchedStore.getState().items;
-        
         // Extract genres, directors, franchises from user's watched/watchlist items
         // This helps us prioritize content similar to what they enjoy
         const userGenrePreferences = new Map<number, number>();
@@ -462,19 +469,122 @@ export default function SearchScreen() {
           allRecommendedItems.slice(0, 6) : 
           filteredRecommendedItems.slice(0, Math.min(filteredRecommendedItems.length, 6)));
         
-        // Get new releases (using trending day but filtering to recent releases)
+        // IMPROVED NEW RELEASES SECTION
+        // First get general new releases from trending
         const allNewReleasesItems = trendingResponse.results.filter(item => {
           const releaseYear = new Date(item.release_date || item.first_air_date || '').getFullYear();
           return releaseYear === currentYear || releaseYear === currentYear - 1;
         });
         
-        // Store original new releases
-        originalNewReleases.current = [...allNewReleasesItems];
+        // Enhanced new releases section specifically for anime and documentaries
+        let specializedNewReleases: TMDbSearchResult[] = [];
+        
+        try {
+          // For anime - get recent anime content (last 2 years)
+          if (selectedCategory === 'anime' || selectedCategory === 'all') {
+            // Use discover API with more specific parameters for anime
+            const animeNewReleases = await discoverContent('tv', {
+              genreIds: [16], // Animation genre
+              withOriginalLanguage: 'ja', // Japanese language
+              sortBy: 'first_air_date.desc', // Sort by newest first
+              releaseDateGte: `${currentYear-1}-01-01`, // Last 2 years
+              voteCountGte: 10, // At least some votes
+              page: 1
+            });
+            
+            // Also get anime movies
+            const animeMovieReleases = await discoverContent('movie', {
+              genreIds: [16], // Animation genre
+              withOriginalLanguage: 'ja', // Japanese language
+              sortBy: 'primary_release_date.desc', // Sort by newest first
+              releaseDateGte: `${currentYear-1}-01-01`, // Last 2 years
+              voteCountGte: 10, // At least some votes
+              page: 1
+            });
+            
+            // Additional search for specific anime keywords to catch more relevant content
+            const animeKeywordSearch = await searchContent('new anime release');
+            const filteredAnimeSearch = animeKeywordSearch.results.filter(item => 
+              (item.genre_ids?.includes(16) || (item as any).original_language === 'ja') &&
+              new Date(item.release_date || item.first_air_date || '2000-01-01').getFullYear() >= currentYear - 1
+            );
+            
+            // Add these specialized anime new releases
+            specializedNewReleases = [
+              ...specializedNewReleases,
+              ...animeNewReleases.results,
+              ...animeMovieReleases.results,
+              ...filteredAnimeSearch
+            ];
+          }
+          
+          // For documentaries - get recent documentary content (last 2 years)
+          if (selectedCategory === 'documentaries' || selectedCategory === 'all') {
+            // Use discover API with more specific parameters for documentaries
+            const docNewReleases = await discoverContent('movie', {
+              genreIds: [99], // Documentary genre
+              sortBy: 'primary_release_date.desc', // Sort by newest first
+              releaseDateGte: `${currentYear-1}-01-01`, // Last 2 years
+              voteCountGte: 5, // Lower threshold for documentaries
+              page: 1
+            });
+            
+            // Also get documentary TV series
+            const docTVReleases = await discoverContent('tv', {
+              genreIds: [99], // Documentary genre
+              sortBy: 'first_air_date.desc', // Sort by newest first
+              releaseDateGte: `${currentYear-1}-01-01`, // Last 2 years
+              voteCountGte: 5, // Lower threshold for documentaries
+              page: 1
+            });
+            
+            // Additional search for specific documentary keywords
+            const docKeywordSearch = await searchContent('new documentary release');
+            const filteredDocSearch = docKeywordSearch.results.filter(item => 
+              item.genre_ids?.includes(99) &&
+              new Date(item.release_date || item.first_air_date || '2000-01-01').getFullYear() >= currentYear - 1
+            );
+            
+            // Add these specialized documentary new releases
+            specializedNewReleases = [
+              ...specializedNewReleases,
+              ...docNewReleases.results,
+              ...docTVReleases.results,
+              ...filteredDocSearch
+            ];
+          }
+        } catch (error) {
+          console.error('Error fetching specialized new releases:', error);
+          // Continue with regular new releases if specialized fetch fails
+        }
+        
+        // Remove duplicates from specialized new releases
+        const newReleasesIdSet = new Set<number>();
+        const combinedNewReleases: TMDbSearchResult[] = [];
+        
+        // First add specialized new releases (prioritize these)
+        specializedNewReleases.forEach(item => {
+          if (!newReleasesIdSet.has(item.id)) {
+            newReleasesIdSet.add(item.id);
+            combinedNewReleases.push(item);
+          }
+        });
+        
+        // Then add general new releases
+        allNewReleasesItems.forEach(item => {
+          if (!newReleasesIdSet.has(item.id)) {
+            newReleasesIdSet.add(item.id);
+            combinedNewReleases.push(item);
+          }
+        });
+        
+        // Store all new releases for filtering
+        originalNewReleases.current = [...combinedNewReleases];
         
         // Filter new releases based on selected category
-        const filteredNewReleasesItems = filterContentByCategory(allNewReleasesItems, selectedCategory);
+        const filteredNewReleasesItems = filterContentByCategory(combinedNewReleases, selectedCategory);
         setNewReleases(selectedCategory === 'all' ? 
-          allNewReleasesItems.slice(0, 10) : 
+          combinedNewReleases.slice(0, 10) : 
           filteredNewReleasesItems.slice(0, 10));
         
       } catch (error) {
