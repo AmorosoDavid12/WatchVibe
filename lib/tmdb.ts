@@ -110,9 +110,10 @@ export function formatSearchResult(result: TMDbSearchResult) {
 export async function getTrending(
   timeWindow: 'day' | 'week' = 'day', 
   mediaType: 'all' | 'movie' | 'tv' | 'person' = 'all',
-  page: number = 1
+  page: number = 1,
+  language: string = 'en-US'
 ): Promise<TMDbSearchResponse> {
-  const url = `${BASE_URL}/trending/${mediaType}/${timeWindow}?api_key=${TMDB_API_KEY}&page=${page}`;
+  const url = `${BASE_URL}/trending/${mediaType}/${timeWindow}?api_key=${TMDB_API_KEY}&page=${page}&language=${language}`;
   
   const response = await fetch(url);
   

@@ -301,8 +301,9 @@ export default function SearchScreen() {
       thresholdDate.setMonth(today.getMonth() - 18);
       const dateThreshold = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, '0')}-01`;
       
-      // Get trending items - UPDATED TO USE WEEKLY TRENDING
-      const trendingResponse = await getTrending('week', 'all');
+      // Get trending items - Using only weekly trending as specified
+      // Using the specific endpoint: https://api.themoviedb.org/3/trending/all/week?language=en-US
+      const trendingResponse = await getTrending('week', 'all', 1, 'en-US');
       
       // Create a set of user item IDs for filtering
       const watchlistItems = useWatchlistStore.getState().items || [];
@@ -374,8 +375,9 @@ export default function SearchScreen() {
       
       // Display "For You" section for "all" category
       if (selectedCategory === 'all') {
-        // Get recommendations using weekly trending per instructions
-        const recommendedResponse = await getTrending('week', 'all');
+        // Get recommendations using trending content instead of personalized recs
+        // Using the specific endpoint: https://api.themoviedb.org/3/trending/all/week?language=en-US
+        const recommendedResponse = await getTrending('week', 'all', 1, 'en-US');
         
         // *****************************************************
         // FOR YOU SECTION - PERSONALIZED RECOMMENDATIONS EXCLUDING USER LISTS
@@ -627,14 +629,15 @@ export default function SearchScreen() {
       // *****************************************************
 
       // Use weekly trending for new releases instead of original implementation
-      const newReleasesResponse = await getTrending('week', 'all');
+      // Using the specific endpoint: https://api.themoviedb.org/3/trending/all/week?language=en-US 
+      const newReleasesResponse = await getTrending('week', 'all', 1, 'en-US');
       
       // Create a unique set of items to avoid duplicates
       const uniqueNewReleases = new Set();
       const finalNewReleases: TMDbSearchResult[] = [];
       
-      // Add movies first
-      const movieNewReleases = await getTrending('week', 'movie');
+      // Add movies first - Using the specific endpoint: https://api.themoviedb.org/3/trending/movie/week?language=en-US
+      const movieNewReleases = await getTrending('week', 'movie', 1, 'en-US');
       for (const item of movieNewReleases.results) {
         if (!uniqueNewReleases.has(item.id)) {
           uniqueNewReleases.add(item.id);
@@ -643,8 +646,8 @@ export default function SearchScreen() {
         }
       }
       
-      // Add TV shows 
-      const tvNewReleases = await getTrending('week', 'tv');
+      // Add TV shows - Using the specific endpoint: https://api.themoviedb.org/3/trending/tv/day?language=en-US
+      const tvNewReleases = await getTrending('day', 'tv', 1, 'en-US'); 
       for (const item of tvNewReleases.results) {
         if (!uniqueNewReleases.has(item.id)) {
           uniqueNewReleases.add(item.id);
@@ -968,7 +971,15 @@ export default function SearchScreen() {
         {/* Trending cards need the title, but in a minimal style */}
         {isTrendingCard && (
           <View style={styles.trendingTitleContainer}>
-            <Text style={styles.trendingTitle} numberOfLines={1}>{title}</Text>
+            <View style={styles.trendingTitleRow}>
+              <Text style={styles.trendingTitle} numberOfLines={1}>{title}</Text>
+              {rating ? (
+                <View style={styles.trendingInlineBadge}>
+                  <Star size={9} color="#FFD700" fill="#FFD700" />
+                  <Text style={styles.trendingRatingText}>{rating}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
         )}
         
@@ -1188,14 +1199,6 @@ export default function SearchScreen() {
       <View style={styles.sectionContainer}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{displayTitle}</Text>
-          
-          {/* Add star rating for Trending Now section */}
-          {isTrending && (
-            <View style={styles.sectionTitleRating}>
-              <Star size={12} color="#FFD700" fill="#FFD700" />
-              <Text style={styles.sectionTitleRatingText}>Top Rated</Text>
-            </View>
-          )}
           
           <TouchableOpacity 
             onPress={() => {
@@ -1832,12 +1835,33 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 8,
     borderBottomRightRadius: 8,
   },
+  trendingTitleRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center', 
+  },
   trendingTitle: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+    flex: 1,
     textShadowColor: 'rgba(0, 0, 0, 0.8)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
+  },
+  trendingInlineBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginLeft: 6,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  trendingRatingText: {
+    color: '#FFD700',
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 3,
   },
 });
