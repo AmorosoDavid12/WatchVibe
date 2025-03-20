@@ -301,8 +301,8 @@ export default function SearchScreen() {
       thresholdDate.setMonth(today.getMonth() - 18);
       const dateThreshold = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, '0')}-01`;
       
-      // Get trending items
-      const trendingResponse = await getTrending('day');
+      // Get trending items - UPDATED TO USE WEEKLY TRENDING
+      const trendingResponse = await getTrending('week', 'all');
       
       // Create a set of user item IDs for filtering
       const watchlistItems = useWatchlistStore.getState().items || [];
@@ -374,8 +374,8 @@ export default function SearchScreen() {
       
       // Display "For You" section for "all" category
       if (selectedCategory === 'all') {
-        // Get recommendations (using trending weekly as recommendations)
-        const recommendedResponse = await getTrending('week');
+        // Get recommendations using weekly trending per instructions
+        const recommendedResponse = await getTrending('week', 'all');
         
         // *****************************************************
         // FOR YOU SECTION - PERSONALIZED RECOMMENDATIONS EXCLUDING USER LISTS
@@ -623,167 +623,43 @@ export default function SearchScreen() {
       }
       
       // *****************************************************
-      // NEW RELEASES SECTION - IMPLEMENTATION WITH 1/10 ANIME RATIO
+      // NEW RELEASES SECTION - USE WEEKLY TRENDING PER REQUEST
       // *****************************************************
 
-      // First get general new releases from trending
-      const allNewReleasesItems = trendingResponse.results.filter((item: any) => {
-        const releaseDate = new Date(item.release_date || item.first_air_date || '');
-        const today = new Date();
-        const monthsAgo = (today.getFullYear() - releaseDate.getFullYear()) * 12 + 
-                          (today.getMonth() - releaseDate.getMonth());
-        
-        // Filter for content from the last 1.5 years (18 months)
-        return monthsAgo <= 18 && item.vote_average >= 6 && (item.vote_count || 0) >= 200;
-      });
+      // Use weekly trending for new releases instead of original implementation
+      const newReleasesResponse = await getTrending('week', 'all');
       
-      // Get regular new movies (non-anime, non-documentary)
-      const regularNewMovies = await discoverContent('movie', {
-        sortBy: 'primary_release_date.desc',
-        releaseDateGte: dateThreshold,
-        voteCountGte: 200,
-        voteAverageGte: 6,
-        page: 1
-      });
-      
-      // Get regular new TV shows (non-anime, non-documentary)
-      const regularNewTVShows = await discoverContent('tv', {
-        sortBy: 'first_air_date.desc',
-        releaseDateGte: dateThreshold,
-        voteCountGte: 200,
-        voteAverageGte: 6,
-        page: 1
-      });
-      
-      // Function to identify anime/documentary content
-      const isAnime = (item: TMDbSearchResult) => 
-        item.genre_ids?.includes(16) || (item as any).original_language === 'ja';
-      
-      const isDocumentary = (item: TMDbSearchResult) => 
-        item.genre_ids?.includes(99);
-      
-      // Filter regular content to exclude anime and documentaries
-      const regularMovies = regularNewMovies.results.filter(item => 
-        !isAnime(item) && !isDocumentary(item));
-      
-      const regularTVShows = regularNewTVShows.results.filter(item => 
-        !isAnime(item) && !isDocumentary(item));
-      
-      // Get anime new releases
-      const animeNewReleases = await discoverContent('tv', {
-        genreIds: [16], // Animation genre
-        withOriginalLanguage: 'ja', // Japanese language
-        sortBy: 'first_air_date.desc',
-        releaseDateGte: dateThreshold,
-        voteCountGte: 50, // Reduced from 200 for anime
-        voteAverageGte: 6,
-        page: 1
-      });
-      
-      const animeMovieReleases = await discoverContent('movie', {
-        genreIds: [16], // Animation genre
-        withOriginalLanguage: 'ja',
-        sortBy: 'primary_release_date.desc',
-        releaseDateGte: dateThreshold,
-        voteCountGte: 50, // Reduced from 200 for anime
-        voteAverageGte: 6,
-        page: 1
-      });
-      
-      // Combine all anime content and sort by popularity
-      const allAnimeContent = [
-        ...animeNewReleases.results,
-        ...animeMovieReleases.results
-      ].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-      
-      // Get documentary releases
-      const docReleases = await discoverContent('movie', {
-        genreIds: [99], // Documentary genre
-        sortBy: 'primary_release_date.desc',
-        releaseDateGte: dateThreshold,
-        voteCountGte: 100, // Reduced from 200 for documentaries
-        voteAverageGte: 6,
-        page: 1
-      });
-      
-      const docTVReleases = await discoverContent('tv', {
-        genreIds: [99], // Documentary genre
-        sortBy: 'first_air_date.desc',
-        releaseDateGte: dateThreshold,
-        voteCountGte: 100, // Reduced from 200 for documentaries
-        voteAverageGte: 6,
-        page: 1
-      });
-      
-      // Combine documentary content
-      const allDocContent = [
-        ...docReleases.results,
-        ...docTVReleases.results
-      ].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-      
-      // Combine regular movies and TV shows in alternating pattern
-      const combinedRegularReleases: TMDbSearchResult[] = [];
-      const maxCount = Math.max(regularMovies.length, regularTVShows.length);
-      
-      for (let i = 0; i < maxCount; i++) {
-        if (i < regularMovies.length) {
-          combinedRegularReleases.push(regularMovies[i]);
-        }
-        if (i < regularTVShows.length) {
-          combinedRegularReleases.push(regularTVShows[i]);
-        }
-      }
-      
-      // Now construct the final new releases list with proper ratios
-      // We want 1 anime for every 9 regular items (10% anime)
+      // Create a unique set of items to avoid duplicates
+      const uniqueNewReleases = new Set();
       const finalNewReleases: TMDbSearchResult[] = [];
-      const animeContentNeeded = Math.max(1, Math.floor(combinedRegularReleases.length / 9));
       
-      // Keep track of used IDs to avoid duplicates
-      const usedIds = new Set<number>();
-      
-      // Add regular content
-      combinedRegularReleases.forEach(item => {
-        if (!usedIds.has(item.id)) {
+      // Add movies first
+      const movieNewReleases = await getTrending('week', 'movie');
+      for (const item of movieNewReleases.results) {
+        if (!uniqueNewReleases.has(item.id)) {
+          uniqueNewReleases.add(item.id);
+          item.media_type = 'movie'; // Ensure media type is set
           finalNewReleases.push(item);
-          usedIds.add(item.id);
-        }
-      });
-      
-      // Calculate anime insertion positions
-      const positions = [];
-      for (let i = 0; i < animeContentNeeded; i++) {
-        // Space them out roughly evenly
-        const pos = Math.floor((i + 1) * (finalNewReleases.length / (animeContentNeeded + 1)));
-        positions.push(pos);
-      }
-      
-      // Insert anime at calculated positions
-      for (let i = 0; i < positions.length && i < allAnimeContent.length; i++) {
-        const anime = allAnimeContent[i];
-        if (!usedIds.has(anime.id)) {
-          // Insert at calculated position (or at end if position exceeds length)
-          const insertPos = Math.min(positions[i], finalNewReleases.length);
-          finalNewReleases.splice(insertPos, 0, anime);
-          usedIds.add(anime.id);
         }
       }
       
-      // Add documentaries (not limited by ratio)
-      allDocContent.forEach(item => {
-        if (!usedIds.has(item.id)) {
+      // Add TV shows 
+      const tvNewReleases = await getTrending('week', 'tv');
+      for (const item of tvNewReleases.results) {
+        if (!uniqueNewReleases.has(item.id)) {
+          uniqueNewReleases.add(item.id);
+          item.media_type = 'tv'; // Ensure media type is set
           finalNewReleases.push(item);
-          usedIds.add(item.id);
         }
-      });
+      }
       
-      // Add any good items from trending that weren't included
-      allNewReleasesItems.forEach(item => {
-        if (!usedIds.has(item.id)) {
+      // Add any remaining general trending items not already included
+      for (const item of newReleasesResponse.results) {
+        if (!uniqueNewReleases.has(item.id)) {
+          uniqueNewReleases.add(item.id);
           finalNewReleases.push(item);
-          usedIds.add(item.id);
         }
-      });
+      }
       
       // Store for filtering
       originalNewReleases.current = [...finalNewReleases];
@@ -1126,7 +1002,7 @@ export default function SearchScreen() {
     if (searchLoading) {
       return (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#4CAF50" />
+          <ActivityIndicator size="large" color="#3498db" />
         </View>
       );
     }
@@ -1312,6 +1188,15 @@ export default function SearchScreen() {
       <View style={styles.sectionContainer}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>{displayTitle}</Text>
+          
+          {/* Add star rating for Trending Now section */}
+          {isTrending && (
+            <View style={styles.sectionTitleRating}>
+              <Star size={12} color="#FFD700" fill="#FFD700" />
+              <Text style={styles.sectionTitleRatingText}>Top Rated</Text>
+            </View>
+          )}
+          
           <TouchableOpacity 
             onPress={() => {
               // Navigate to appropriate highest rated page if it's the Highest Rated section
@@ -1523,7 +1408,7 @@ export default function SearchScreen() {
       
       {loading && (
         <View style={styles.fullscreenLoader}>
-          <ActivityIndicator size="large" color="#4CAF50" />
+          <ActivityIndicator size="large" color="#3498db" />
         </View>
       )}
     </View>
@@ -1710,6 +1595,23 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
+    flex: 1,
+  },
+  sectionTitleRating: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 'auto',
+    marginLeft: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 12,
+  },
+  sectionTitleRatingText: {
+    color: '#FFD700',
+    fontSize: 12,
+    fontWeight: '500',
+    marginLeft: 4,
   },
   seeAllText: {
     color: '#3498db',
