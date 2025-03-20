@@ -22,19 +22,19 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="watched"
-        options={{
-          title: 'Watched',
-          tabBarIcon: ({ size, color }) => <CircleCheck size={size} color={color} />,
-          tabBarActiveTintColor: "rgb(140, 82, 255)",
-        }}
-      />
-      <Tabs.Screen
         name="search"
         options={{
           title: 'Search',
           tabBarIcon: ({ size, color }) => <Search size={size} color={color} />,
           tabBarActiveTintColor: "#2196F3",
+        }}
+      />
+      <Tabs.Screen
+        name="watched"
+        options={{
+          title: 'Watched',
+          tabBarIcon: ({ size, color }) => <CircleCheck size={size} color={color} />,
+          tabBarActiveTintColor: "rgb(140, 82, 255)",
         }}
       />
       <Tabs.Screen

@@ -164,11 +164,14 @@ export default function SearchScreen() {
         // Only return non-animated English TV shows
         return isTVShow && !isAnimation && isEnglish;
       } else if (category === 'anime') {
-        // For anime, look for animation genre_ids (16) in movies/tv shows
-        // or Japanese origin content with animation
+        // For anime, be less restrictive to include more content
+        // Look for animation in any language, but prioritize Japanese
         const isAnimation = item.genre_ids?.includes(16);
         const isJapanese = (item as any).original_language === 'ja';
-        return isAnimation || (isJapanese && item.genre_ids?.includes(16));
+        const isAsian = ['ja', 'ko', 'zh'].includes((item as any).original_language);
+        
+        // Include any animation OR any Japanese/Korean/Chinese content
+        return isAnimation || isJapanese || isAsian;
       } else if (category === 'documentaries') {
         // For documentaries, filter by documentary genre_id (99)
         return item.genre_ids?.includes(99);
