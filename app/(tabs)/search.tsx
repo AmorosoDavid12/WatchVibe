@@ -999,6 +999,10 @@ export default function SearchScreen() {
       itemHeight = itemWidth * 1.5;
     }
     
+    // If it's a trending card, we want to adopt a cleaner look similar to highest rated cards
+    const isTrendingCard = size === 'wide';
+    const shouldShowMinimalOverlay = isTrendingCard || isInHighestRatedSection;
+    
     return (
       <TouchableOpacity
         style={[
@@ -1044,7 +1048,7 @@ export default function SearchScreen() {
           resizeMode={size === 'wide' ? 'cover' : 'cover'}
         />
         
-        {/* Media Type Indicator (Movie/TV) - Show for all items now including highest rated */}
+        {/* Media Type Indicator (Movie/TV) */}
         <View style={styles.mediaTypeIndicator}>
           {mediaType === 'movie' ? 
             <Film size={12} color="#fff" /> : 
@@ -1055,16 +1059,22 @@ export default function SearchScreen() {
           </Text>
         </View>
         
-        {/* For highest rated section, show rating with star in bottom left */}
+        {/* For highest rated section, just show rating with star in corner */}
         {isInHighestRatedSection && rating ? (
           <View style={styles.highestRatedBadge}>
             <Star size={9} color="#FFD700" fill="#FFD700" />
             <Text style={styles.highestRatedBadgeText}>{rating}</Text>
           </View>
+        ) : isTrendingCard && rating ? (
+          // For trending cards, show rating similar to highest rated
+          <View style={styles.trendingRatingBadge}>
+            <Star size={9} color="#FFD700" fill="#FFD700" />
+            <Text style={styles.highestRatedBadgeText}>{rating}</Text>
+          </View>
         ) : null}
         
-        {/* Media info overlay with fixed height - only for non-highest rated items */}
-        {!isInHighestRatedSection && (
+        {/* Media info overlay with fixed height - only for normal cards */}
+        {!shouldShowMinimalOverlay && (
           <View style={[styles.mediaItemInfo, { maxHeight: 73 }]}>
             <Text style={styles.mediaItemTitle} numberOfLines={1}>{title}</Text>
             <View style={styles.mediaItemMetaColumn}>
@@ -1076,6 +1086,13 @@ export default function SearchScreen() {
                 </View>
               ) : null}
             </View>
+          </View>
+        )}
+        
+        {/* Trending cards need the title, but in a minimal style */}
+        {isTrendingCard && (
+          <View style={styles.trendingTitleContainer}>
+            <Text style={styles.trendingTitle} numberOfLines={1}>{title}</Text>
           </View>
         )}
         
@@ -1098,7 +1115,7 @@ export default function SearchScreen() {
             onPress={() => handleAddToWatchlist(item)}
             activeOpacity={0.7}
           >
-            <Plus size={10} color="#fff" />
+            <Plus size={13} color="#fff" />
           </TouchableOpacity>
         )}
       </TouchableOpacity>
@@ -1882,7 +1899,6 @@ const styles = StyleSheet.create({
   highRatedItemBorder: {
     borderWidth: 2,
     borderColor: '#FFD700',
-    ...getElevation(5),
   },
   enhancedRating: {
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -1891,5 +1907,35 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
     borderWidth: 1,
     borderColor: '#FFD700',
+  },
+  trendingRatingBadge: {
+    position: 'absolute',
+    bottom: 8,
+    left: 8,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 12,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trendingTitleContainer: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    padding: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    borderBottomLeftRadius: 8,
+    borderBottomRightRadius: 8,
+  },
+  trendingTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    textShadowColor: 'rgba(0, 0, 0, 0.8)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
 });

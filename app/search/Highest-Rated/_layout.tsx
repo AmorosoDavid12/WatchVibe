@@ -19,6 +19,7 @@ export default function HighestRatedLayout() {
           contentStyle: {
             backgroundColor: '#121212',
           },
+          headerShadowVisible: false,
         }}
       >
         <Stack.Screen
@@ -45,7 +46,7 @@ export default function HighestRatedLayout() {
         <Stack.Screen
           name="anime" 
           options={{ 
-            title: "Highest Rated Anime",
+            title: "Highest Rated Animes",
             headerBackTitle: "Back"
           }}
         />

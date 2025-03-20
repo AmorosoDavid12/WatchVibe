@@ -158,7 +158,7 @@ export default function MediaGrid({ data, isHighestRatedSection = true }: MediaG
             onPress={() => handleAddToWatchlist(item)}
             activeOpacity={0.7}
           >
-            <Plus size={10} color="#fff" />
+            <Plus size={13} color="#fff" />
           </TouchableOpacity>
         )}
       </TouchableOpacity>
