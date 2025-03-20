@@ -14,13 +14,13 @@ import {
   Animated,
   Platform,
 } from 'react-native';
-import { useWatchlistStore } from '../../lib/watchlistStore';
-import { searchContent, formatSearchResult, TMDbSearchResult, getTrending, getMovieDetails, discoverContent } from '../../lib/tmdb';
+import { useWatchlistStore, WatchlistItem } from '../../lib/watchlistStore';
+import { searchContent, formatSearchResult, TMDbSearchResult, getTrending, getMovieDetails, discoverContent, getTopRated } from '../../lib/tmdb';
 import { Plus, Check, Film, Tv, Repeat, Search, Star } from 'lucide-react-native';
 import { useRouter } from 'expo-router';
 import { debounce } from 'lodash';
 import Toast from 'react-native-toast-message';
-import { useWatchedStore } from '@/lib/watchedStore';
+import { useWatchedStore, WatchedItem } from '@/lib/watchedStore';
 
 const { width, height } = Dimensions.get('window');
 const COLUMN_COUNT = 2;
@@ -81,6 +81,9 @@ export default function SearchScreen() {
   const { hasItem: isInWatched, removeItem: removeFromWatched } = useWatchedStore();
   const router = useRouter();
 
+  // Add a dedicated ref for storing the highest rated content
+  const originalHighestRatedItems = useRef<TMDbSearchResult[]>([]);
+
   // Save search state to localStorage/sessionStorage when it changes
   useEffect(() => {
     try {
@@ -135,24 +138,44 @@ export default function SearchScreen() {
   const filterContentByCategory = (items: TMDbSearchResult[], category: CategoryType): TMDbSearchResult[] => {
     if (category === 'all') return items;
     
-    if (category === 'movies') {
-      return items.filter(item => item.media_type === 'movie');
-    } else if (category === 'tv') {
-      return items.filter(item => item.media_type === 'tv');
-    } else if (category === 'anime') {
-      // For anime, look for animation genre_ids (16) in movies/tv shows
-      // or Japanese origin content with animation
-      return items.filter(item => {
+    return items.filter(item => {
+      // Ensure media_type is defined - infer from properties if missing
+      const mediaType = item.media_type || (item.title ? 'movie' : 'tv');
+      
+      // If media_type was missing, set it now for consistency
+      if (!item.media_type) {
+        item.media_type = mediaType;
+      }
+      
+      if (category === 'movies') {
+        // For movies, must be movie type AND not animation genre (16) AND preferably English
+        const isMovie = mediaType === 'movie';
+        const isAnimation = item.genre_ids?.includes(16);
+        const isEnglish = (item as any).original_language === 'en';
+        
+        // Only return non-animated English movies 
+        return isMovie && !isAnimation && isEnglish;
+      } else if (category === 'tv') {
+        // For TV, must be TV type AND not animation genre (16) AND preferably English
+        const isTVShow = mediaType === 'tv';
+        const isAnimation = item.genre_ids?.includes(16);
+        const isEnglish = (item as any).original_language === 'en';
+        
+        // Only return non-animated English TV shows
+        return isTVShow && !isAnimation && isEnglish;
+      } else if (category === 'anime') {
+        // For anime, look for animation genre_ids (16) in movies/tv shows
+        // or Japanese origin content with animation
         const isAnimation = item.genre_ids?.includes(16);
         const isJapanese = (item as any).original_language === 'ja';
         return isAnimation || (isJapanese && item.genre_ids?.includes(16));
-      });
-    } else if (category === 'documentaries') {
-      // For documentaries, filter by documentary genre_id (99)
-      return items.filter(item => item.genre_ids?.includes(99));
-    }
-    
-    return items; // Default fallback
+      } else if (category === 'documentaries') {
+        // For documentaries, filter by documentary genre_id (99)
+        return item.genre_ids?.includes(99);
+      }
+      
+      return false; // Default fallback
+    });
   };
 
   // Fetch initial data on component mount
@@ -183,136 +206,123 @@ export default function SearchScreen() {
       originalTrendingItems.current.slice(0, 10) : 
       filteredTrending.slice(0, 10));
     
-    // For the recommended/highest rated section
-    if (selectedCategory === 'all') {
-      // When in "all" category, use personalized "For You" recommendations
-      const filteredRecommended = filterContentByCategory(originalRecommendedItems.current, selectedCategory);
-      setRecommendedItems(filteredRecommended.slice(0, 6));
-    } else {
-      // For other categories, create a "Highest Rated" list
-      const filteredItems = filterContentByCategory(originalTrendingItems.current, selectedCategory);
-      
-      // Sort purely by rating for highest rated section
-      const sortedByRating = [...filteredItems].sort((a, b) => b.vote_average - a.vote_average);
-      
-      // Get top 5 highest rated overall
-      const topRated = sortedByRating.slice(0, 5);
-      
-      // Get highest rated recent items (last 3 years)
-      const currentYear = new Date().getFullYear();
-      const recentHighRated = sortedByRating
-        .filter(item => {
-          const releaseYear = new Date(item.release_date || item.first_air_date || '').getFullYear();
-          return releaseYear >= currentYear - 3 && !topRated.some(tr => tr.id === item.id);
-        })
-        .slice(0, 10);
-      
-      // Combine them
-      const highestRatedItems = [...topRated, ...recentHighRated];
-      setRecommendedItems(highestRatedItems.slice(0, Math.min(highestRatedItems.length, 6)));
-    }
-    
-    // Filter new releases from original data
+    // Filter new releases
     const filteredNewReleases = filterContentByCategory(originalNewReleases.current, selectedCategory);
-    setNewReleases(selectedCategory === 'all' ? 
-      originalNewReleases.current.slice(0, 10) : 
-      filteredNewReleases.slice(0, 10));
+    setNewReleases(filteredNewReleases.slice(0, 10));
     
-    // Update spotlight if needed based on new filtered items
-    if (filteredTrending.length > 0 && (
-      selectedCategory === 'all' || 
-      (selectedCategory === 'movies' && spotlightItem?.media_type === 'movie') ||
-      (selectedCategory === 'tv' && spotlightItem?.media_type === 'tv')
-    )) {
-      // The spotlight is still valid for this category, no need to change
-    } else {
-      // Need to find a new spotlight item from filtered trending items
-      const spotlightCandidates = filteredTrending.filter(item => 
-        item.backdrop_path && 
-        item.vote_average >= 7.0 &&
-        item.overview && 
-        item.overview.length > 100
-      );
-      
-      if (spotlightCandidates.length > 0) {
-        // Pick a random good candidate
-        const randomIndex = Math.floor(Math.random() * Math.min(3, spotlightCandidates.length));
-        setSpotlightItem(spotlightCandidates[randomIndex]);
+    // For recommended/highest rated
+    if (selectedCategory !== 'all') {
+      // For non-all categories, check if we already have the correct category-specific highest rated items
+      if (originalHighestRatedItems.current.length > 0) {
+        // Re-fetch if the stored items don't match the current category 
+        // (this happens when switching between categories)
+        const needToFetch = selectedCategory === 'movies' && 
+          originalHighestRatedItems.current[0]?.media_type !== 'movie';
+            
+        const needToFetchTV = selectedCategory === 'tv' && 
+          originalHighestRatedItems.current[0]?.media_type !== 'tv';
+            
+        if (needToFetch || needToFetchTV) {
+          // Need to re-fetch data for this category
+          fetchInitialData();
+          return;
+        }
+            
+        // Apply category filters to highest rated items
+        let filteredHighestRated = originalHighestRatedItems.current;
+        
+        // Filter based on category
+        if (selectedCategory === 'movies') {
+          // English movies only, no animation
+          filteredHighestRated = filteredHighestRated.filter(item => {
+            const isEnglish = (item as any).original_language === 'en';
+            const isAnimation = item.genre_ids?.includes(16);
+            return item.media_type === 'movie' && isEnglish && !isAnimation;
+          });
+        } else if (selectedCategory === 'tv') {
+          // English TV shows only, no animation
+          filteredHighestRated = filteredHighestRated.filter(item => {
+            const isEnglish = (item as any).original_language === 'en';
+            const isAnimation = item.genre_ids?.includes(16);
+            return item.media_type === 'tv' && isEnglish && !isAnimation;
+          });
+        } else if (selectedCategory === 'anime') {
+          // Anime filtering
+          filteredHighestRated = filteredHighestRated.filter(item => {
+            const isAnimation = item.genre_ids?.includes(16);
+            const isJapanese = (item as any).original_language === 'ja';
+            return isAnimation || (isJapanese && item.genre_ids?.includes(16));
+          });
+        } else if (selectedCategory === 'documentaries') {
+          // Documentary filtering
+          filteredHighestRated = filteredHighestRated.filter(item => 
+            item.genre_ids?.includes(99)
+          );
+        }
+        
+        // Sort by rating
+        filteredHighestRated = filteredHighestRated.sort((a, b) => b.vote_average - a.vote_average);
+        
+        // Use filtered results if we have any, otherwise fetch new data
+        if (filteredHighestRated.length > 0) {
+          setRecommendedItems(filteredHighestRated.slice(0, 10));
+        } else {
+          // If filtering removed all items, we need to fetch data
+          fetchInitialData();
+        }
       } else {
-        // If no suitable spotlight candidate is found, set spotlight to null
-        setSpotlightItem(null);
+        // If we don't have highest rated items yet, fetch data
+        fetchInitialData();
+      }
+    } else {
+      // For "all" category, use the personalized recommendations
+      if (originalRecommendedItems.current.length > 0) {
+        setRecommendedItems(originalRecommendedItems.current.slice(0, 6));
+      } else {
+        // If we don't have recommended items yet, fetch data
+        fetchInitialData();
       }
     }
   }, [selectedCategory]);
 
+  // Define the fetchInitialData function to fetch initial data
   const fetchInitialData = async () => {
     setLoading(true);
+    setError(null);
+    
     try {
-      // Skip fetching if we're restoring search state
-      if (isSearchActive && query) {
-        setLoading(false);
-        return;
-      }
+      // Define current year, month, and date threshold for filtering
+      const today = new Date();
+      const currentYear = today.getFullYear();
+      const currentMonth = today.getMonth();
       
-      // Fetch trending content
+      // Calculate date threshold for API calls (18 months ago)
+      const thresholdDate = new Date(today);
+      thresholdDate.setMonth(today.getMonth() - 18);
+      const dateThreshold = `${thresholdDate.getFullYear()}-${String(thresholdDate.getMonth() + 1).padStart(2, '0')}-01`;
+      
+      // Get trending items
       const trendingResponse = await getTrending('day');
-      let allTrendingItems = trendingResponse.results;
       
-      // Get user lists for filtering
-      const watchlistItems = useWatchlistStore.getState().items;
-      const watchedItems = useWatchedStore.getState().items;
-      const userItemIds = new Set([
-        ...watchlistItems.map((item: any) => item.id),
-        ...watchedItems.map((item: any) => item.id)
+      // Create a set of user item IDs for filtering
+      const watchlistItems = useWatchlistStore.getState().items || [];
+      const watchedItems = useWatchedStore.getState().items || [];
+      
+      const userItemIds = new Set<number>([
+        ...watchlistItems.map((item: WatchlistItem) => item.id),
+        ...watchedItems.map((item: WatchedItem) => item.id)
       ]);
       
-      // Get additional content for anime and documentaries since they're less common in trending
-      // Fetch more content for anime (animation genre)
-      let animeItems: TMDbSearchResult[] = [];
-      let documentaryItems: TMDbSearchResult[] = [];
+      // Store trending items for filtering operations
+      originalTrendingItems.current = [...trendingResponse.results];
       
-      try {
-        // Get animation content (genre_id 16 for animation)
-        const animeResponse = await searchContent('anime animation japanese');
-        animeItems = animeResponse.results.filter(item => 
-          item.genre_ids?.includes(16) || 
-          (item as any).original_language === 'ja'
-        );
-        
-        // Get documentary content (genre_id 99 for documentaries)
-        const documentaryResponse = await searchContent('documentary');
-        documentaryItems = documentaryResponse.results.filter(item => 
-          item.genre_ids?.includes(99)
-        );
-        
-        // Add these items to our trending items pool
-        allTrendingItems = [
-          ...allTrendingItems,
-          ...animeItems.filter(item => !allTrendingItems.some(ti => ti.id === item.id)),
-          ...documentaryItems.filter(item => !allTrendingItems.some(ti => ti.id === item.id))
-        ];
-      } catch (error) {
-        console.error('Error fetching specialized content:', error);
-        // Continue with existing trending items if this fails
-      }
-      
-      // Store the original trending items for later filtering
-      originalTrendingItems.current = [...allTrendingItems];
-      
-      // Apply category filtering to trending items
-      let filteredTrendingItems = filterContentByCategory(allTrendingItems, selectedCategory);
+      // Apply category filtering
+      const filteredTrendingItems = filterContentByCategory(trendingResponse.results, selectedCategory);
       setTrendingItems(selectedCategory === 'all' ? 
-        originalTrendingItems.current.slice(0, 10) : 
+        trendingResponse.results.slice(0, 10) : 
         filteredTrendingItems.slice(0, 10));
       
-      // Set spotlight item with improved criteria:
-      // 1. Must be a movie with a backdrop
-      // 2. Must have rating >= 7.0
-      // 3. Must have overview text
-      // 4. Prefer newer releases (last 2 years)
-      // 5. Sort by popularity and vote_average
-      
-      const currentYear = new Date().getFullYear();
+      // Set spotlight item with improved criteria
       const twoYearsAgo = currentYear - 2;
       
       const spotlightCandidates = filteredTrendingItems
@@ -323,63 +333,82 @@ export default function SearchScreen() {
           item.overview && 
           item.overview.length > 100
         );
-        
-        // First try to find recent popular movies
-        const recentSpotlightCandidates = spotlightCandidates
-          .filter(item => {
-            const releaseYear = new Date(item.release_date || '').getFullYear();
-            return releaseYear >= twoYearsAgo;
-          })
-          .sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
-        
-        // If we have recent candidates, use the most popular one
-        // Otherwise fall back to overall highest rated
-        const movieSpotlight = recentSpotlightCandidates.length > 0 
-          ? recentSpotlightCandidates[0] 
-          : spotlightCandidates.sort((a, b) => b.vote_average - a.vote_average)[0] || null;
-        
-        if (movieSpotlight) {
-          setSpotlightItem(movieSpotlight);
-        }
-        
+      
+      // First try to find recent popular movies
+      const recentSpotlightCandidates = spotlightCandidates
+        .filter(item => {
+          const releaseYear = new Date(item.release_date || '').getFullYear();
+          return releaseYear >= twoYearsAgo;
+        })
+        .sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+      
+      // If we have recent candidates, use the most popular one
+      // Otherwise fall back to overall highest rated
+      const movieSpotlight = recentSpotlightCandidates.length > 0 
+        ? recentSpotlightCandidates[0] 
+        : spotlightCandidates.sort((a, b) => b.vote_average - a.vote_average)[0] || null;
+      
+      if (movieSpotlight) {
+        setSpotlightItem(movieSpotlight);
+      }
+      
+      // *****************************************************
+      // QUALITY SECTION - IMPLEMENTATION OF HIGHEST RATED CONTENT
+      // *****************************************************
+      
+      // Fetch highest rated movies directly from the top_rated endpoint
+      const topRatedMovies = await getTopRated('movie', 1);
+      // Make sure each item has media_type set
+      topRatedMovies.results.forEach(item => {
+        item.media_type = 'movie';
+      });
+      console.log('Top Rated Movies from endpoint:', topRatedMovies.results[0]); // Debug
+      
+      // Fetch top rated TV shows directly from the top_rated endpoint
+      const topRatedTVShows = await getTopRated('tv', 1);
+      // Make sure each item has media_type set
+      topRatedTVShows.results.forEach(item => {
+        item.media_type = 'tv';
+      });
+      console.log('Top Rated TV Shows from endpoint:', topRatedTVShows.results[0]); // Debug
+      
+      // Display "For You" section for "all" category
+      if (selectedCategory === 'all') {
         // Get recommendations (using trending weekly as recommendations)
         const recommendedResponse = await getTrending('week');
+        
+        // *****************************************************
+        // FOR YOU SECTION - PERSONALIZED RECOMMENDATIONS EXCLUDING USER LISTS
+        // *****************************************************
         
         // Filter out items that are already in the user's watchlist or watched list
         let allRecommendedItems = recommendedResponse.results
           .filter(item => item.id !== movieSpotlight?.id && !userItemIds.has(item.id));
         
-        // Get user preferences from watchlist and watched items
         // Extract genres, directors, franchises from user's watched/watchlist items
         // This helps us prioritize content similar to what they enjoy
         const userGenrePreferences = new Map<number, number>();
         
         // Give more weight to watched items (they finished these)
-        watchedItems.forEach((item: any) => {
-          (item.genre_ids as number[] || []).forEach((genreId: number) => {
+        watchedItems.forEach((item: WatchedItem) => {
+          const itemWithGenres = item as unknown as { genre_ids?: number[] };
+          (itemWithGenres.genre_ids || []).forEach((genreId: number) => {
             userGenrePreferences.set(genreId, (userGenrePreferences.get(genreId) || 0) + 2);
           });
         });
         
         // Less weight for watchlist items (they're interested but haven't watched)
-        watchlistItems.forEach((item: any) => {
-          (item.genre_ids as number[] || []).forEach((genreId: number) => {
+        watchlistItems.forEach((item: WatchlistItem) => {
+          const itemWithGenres = item as unknown as { genre_ids?: number[] };
+          (itemWithGenres.genre_ids || []).forEach((genreId: number) => {
             userGenrePreferences.set(genreId, (userGenrePreferences.get(genreId) || 0) + 1);
           });
         });
-        
-        // Add more specialized recommendations based on higher quality scores
-        // For better "For You" recommendations, prioritize:
-        // 1. Higher rated content (vote_average >= 7.5)
-        // 2. More recent releases (last 3 years)
-        // 3. Popular but not necessarily trending items
-        // 4. Content with genres matching user preferences
         
         // Sort by a quality score combining rating, recency, popularity and user preferences
         allRecommendedItems.sort((a, b) => {
           const aReleaseYear = new Date(a.release_date || a.first_air_date || '').getFullYear();
           const bReleaseYear = new Date(b.release_date || b.first_air_date || '').getFullYear();
-          const currentYear = new Date().getFullYear();
           
           // Calculate recency bonus (0-3 points)
           const aRecencyBonus = Math.max(0, 3 - (currentYear - aReleaseYear));
@@ -407,7 +436,7 @@ export default function SearchScreen() {
           const aTitleLower = (a.title || a.name || '').toLowerCase();
           const bTitleLower = (b.title || b.name || '').toLowerCase();
           
-          watchedItems.forEach((item: any) => {
+          watchedItems.forEach((item: WatchedItem) => {
             const itemTitle = (item.title || '').toLowerCase();
             if (itemTitle && aTitleLower.startsWith(itemTitle) || itemTitle.startsWith(aTitleLower)) {
               aPreferenceScore += 3; // Big boost for franchise matches
@@ -425,175 +454,361 @@ export default function SearchScreen() {
           return bScore - aScore;
         });
         
-        // Store original recommended items
+        // Store for filtering and display
         originalRecommendedItems.current = [...allRecommendedItems];
-        
-        // For non-all categories, we'll need a "Highest Rated" list instead of "For You"
-        // Create a separate highest rated list for each category
+        setRecommendedItems(allRecommendedItems.slice(0, 6));
+      } 
+      else {
+        // Display "Highest Rated" for specific categories
         let highestRatedItems: TMDbSearchResult[] = [];
         
-        if (selectedCategory !== 'all') {
-          // For highest rated, we want:
-          // 1. Top 5 highest rated overall (regardless of year)
-          // 2. Then highest rated from the last 3 years
-          const filteredItems = filterContentByCategory(allRecommendedItems, selectedCategory);
+        // Store for category-specific display without additional filtering
+        if (selectedCategory === 'movies') {
+          // Ensure media_type is set on all items
+          topRatedMovies.results.forEach(item => {
+            item.media_type = 'movie';
+            (item as any)._source = 'top_rated_movies_endpoint';
+          });
           
-          // Sort purely by rating for highest rated section
-          const sortedByRating = [...filteredItems].sort((a, b) => b.vote_average - a.vote_average);
+          // Filter for English language only and no animation
+          const englishNonAnimatedMovies = topRatedMovies.results.filter(item => {
+            const isEnglish = (item as any).original_language === 'en';
+            const isAnimation = item.genre_ids?.includes(16);
+            return isEnglish && !isAnimation;
+          });
           
-          // Get top 5 highest rated overall
-          const topRated = sortedByRating.slice(0, 5);
+          // Directly use the filtered top_rated movies
+          highestRatedItems = [...englishNonAnimatedMovies];
+          console.log('Using highestRatedItems from movie endpoint (English only):', highestRatedItems[0]); // Debug
+        } 
+        else if (selectedCategory === 'tv') {
+          // Ensure media_type is set on all items
+          topRatedTVShows.results.forEach(item => {
+            item.media_type = 'tv';
+            (item as any)._source = 'top_rated_tv_endpoint'; 
+          });
           
-          // Get highest rated recent items (last 3 years)
-          const currentYear = new Date().getFullYear();
-          const recentHighRated = sortedByRating
+          // Filter for English language only and no animation
+          const englishNonAnimatedTVShows = topRatedTVShows.results.filter(item => {
+            const isEnglish = (item as any).original_language === 'en';
+            const isAnimation = item.genre_ids?.includes(16);
+            return isEnglish && !isAnimation;
+          });
+          
+          // Directly use the filtered top_rated TV shows
+          highestRatedItems = [...englishNonAnimatedTVShows];
+          console.log('Using highestRatedItems from TV endpoint (English only):', highestRatedItems[0]); // Debug
+        }
+        else if (selectedCategory === 'anime') {
+          // For anime, we need specialized filtering since there's no direct top_rated anime endpoint
+          // Get a larger set of top-rated TV shows and filter them
+          const moreTVShows = await getTopRated('tv', 2); // Get page 2 as well for more options
+          // Ensure media_type is set for all TV shows
+          moreTVShows.results.forEach(item => {
+            item.media_type = 'tv';
+          });
+          
+          const animeFiltered = [...topRatedTVShows.results, ...moreTVShows.results]
             .filter(item => {
-              const releaseYear = new Date(item.release_date || item.first_air_date || '').getFullYear();
-              return releaseYear >= currentYear - 3 && !topRated.some(tr => tr.id === item.id);
+              // Identify anime as Japanese animation
+              const isAnimation = item.genre_ids?.includes(16);
+              const isJapanese = (item as any).original_language === 'ja';
+              return isAnimation || (isJapanese && item.genre_ids?.includes(16));
             })
-            .slice(0, 10);
+            .sort((a, b) => b.vote_average - a.vote_average);
           
-          // Combine them
-          highestRatedItems = [...topRated, ...recentHighRated];
+          // If we found some anime in top_rated, use that
+          if (animeFiltered.length > 0) {
+            // Mark the source for debugging
+            animeFiltered.forEach(item => {
+              item.media_type = 'tv'; // Ensure media_type is set
+              (item as any)._source = 'top_rated_anime_filtered';
+            });
+            highestRatedItems = animeFiltered;
+          } else {
+            // Fallback to discover for anime
+            const animeDiscover = await discoverContent('tv', {
+              genreIds: [16],
+              withOriginalLanguage: 'ja',
+              sortBy: 'vote_average.desc',
+              voteCountGte: 50,
+              voteAverageGte: 7.0,
+              page: 1
+            });
+            // Ensure media_type is set for all items
+            animeDiscover.results.forEach(item => {
+              item.media_type = 'tv';
+              (item as any)._source = 'discover_anime';
+            });
+            highestRatedItems = animeDiscover.results;
+          }
+        }
+        else if (selectedCategory === 'documentaries') {
+          // For documentaries, we need specialized filtering
+          // Get more top-rated movies and filter them
+          const moreMovies = await getTopRated('movie', 2); // Get page 2 as well
+          // Ensure media_type is set
+          moreMovies.results.forEach(item => {
+            item.media_type = 'movie';
+          });
           
-          // Keep this for filtering operations later
-          originalRecommendedItems.current = [...highestRatedItems];
+          const docsFiltered = [...topRatedMovies.results, ...moreMovies.results]
+            .filter(item => item.genre_ids?.includes(99))
+            .sort((a, b) => b.vote_average - a.vote_average);
+            
+          // If we found some documentaries in top_rated, use that
+          if (docsFiltered.length > 0) {
+            // Mark the source for debugging
+            docsFiltered.forEach(item => {
+              item.media_type = 'movie'; // Ensure media_type is set
+              (item as any)._source = 'top_rated_docs_filtered';
+            });
+            highestRatedItems = docsFiltered;
+          } else {
+            // Fallback to discover for documentaries
+            const docDiscover = await discoverContent('movie', {
+              genreIds: [99],
+              sortBy: 'vote_average.desc',
+              voteCountGte: 100,
+              voteAverageGte: 7.0,
+              page: 1
+            });
+            // Ensure media_type is set for all items
+            docDiscover.results.forEach(item => {
+              item.media_type = 'movie';
+              (item as any)._source = 'discover_docs';
+            });
+            highestRatedItems = docDiscover.results;
+          }
         }
         
-        // Filter recommended items based on selected category
-        const filteredRecommendedItems = selectedCategory === 'all'
-          ? filterContentByCategory(allRecommendedItems, selectedCategory)
-          : highestRatedItems;
+        // Filter out any items without media_type
+        highestRatedItems = highestRatedItems.filter(item => item.media_type === 'movie' || item.media_type === 'tv');
         
-        setRecommendedItems(selectedCategory === 'all' ? 
-          allRecommendedItems.slice(0, 6) : 
-          filteredRecommendedItems.slice(0, Math.min(filteredRecommendedItems.length, 6)));
+        // Store in a dedicated ref for highest rated content to avoid mixing with other data
+        originalHighestRatedItems.current = [...highestRatedItems];
         
-        // IMPROVED NEW RELEASES SECTION
-        // First get general new releases from trending
-        const allNewReleasesItems = trendingResponse.results.filter(item => {
-          const releaseYear = new Date(item.release_date || item.first_air_date || '').getFullYear();
-          return releaseYear === currentYear || releaseYear === currentYear - 1;
-        });
-        
-        // Enhanced new releases section specifically for anime and documentaries
-        let specializedNewReleases: TMDbSearchResult[] = [];
-        
-        try {
-          // For anime - get recent anime content (last 2 years)
-          if (selectedCategory === 'anime' || selectedCategory === 'all') {
-            // Use discover API with more specific parameters for anime
-            const animeNewReleases = await discoverContent('tv', {
-              genreIds: [16], // Animation genre
-              withOriginalLanguage: 'ja', // Japanese language
-              sortBy: 'first_air_date.desc', // Sort by newest first
-              releaseDateGte: `${currentYear-1}-01-01`, // Last 2 years
-              voteCountGte: 10, // At least some votes
-              page: 1
-            });
-            
-            // Also get anime movies
-            const animeMovieReleases = await discoverContent('movie', {
-              genreIds: [16], // Animation genre
-              withOriginalLanguage: 'ja', // Japanese language
-              sortBy: 'primary_release_date.desc', // Sort by newest first
-              releaseDateGte: `${currentYear-1}-01-01`, // Last 2 years
-              voteCountGte: 10, // At least some votes
-              page: 1
-            });
-            
-            // Additional search for specific anime keywords to catch more relevant content
-            const animeKeywordSearch = await searchContent('new anime release');
-            const filteredAnimeSearch = animeKeywordSearch.results.filter(item => 
-              (item.genre_ids?.includes(16) || (item as any).original_language === 'ja') &&
-              new Date(item.release_date || item.first_air_date || '2000-01-01').getFullYear() >= currentYear - 1
-            );
-            
-            // Add these specialized anime new releases
-            specializedNewReleases = [
-              ...specializedNewReleases,
-              ...animeNewReleases.results,
-              ...animeMovieReleases.results,
-              ...filteredAnimeSearch
-            ];
-          }
-          
-          // For documentaries - get recent documentary content (last 2 years)
-          if (selectedCategory === 'documentaries' || selectedCategory === 'all') {
-            // Use discover API with more specific parameters for documentaries
-            const docNewReleases = await discoverContent('movie', {
-              genreIds: [99], // Documentary genre
-              sortBy: 'primary_release_date.desc', // Sort by newest first
-              releaseDateGte: `${currentYear-1}-01-01`, // Last 2 years
-              voteCountGte: 5, // Lower threshold for documentaries
-              page: 1
-            });
-            
-            // Also get documentary TV series
-            const docTVReleases = await discoverContent('tv', {
-              genreIds: [99], // Documentary genre
-              sortBy: 'first_air_date.desc', // Sort by newest first
-              releaseDateGte: `${currentYear-1}-01-01`, // Last 2 years
-              voteCountGte: 5, // Lower threshold for documentaries
-              page: 1
-            });
-            
-            // Additional search for specific documentary keywords
-            const docKeywordSearch = await searchContent('new documentary release');
-            const filteredDocSearch = docKeywordSearch.results.filter(item => 
-              item.genre_ids?.includes(99) &&
-              new Date(item.release_date || item.first_air_date || '2000-01-01').getFullYear() >= currentYear - 1
-            );
-            
-            // Add these specialized documentary new releases
-            specializedNewReleases = [
-              ...specializedNewReleases,
-              ...docNewReleases.results,
-              ...docTVReleases.results,
-              ...filteredDocSearch
-            ];
-          }
-        } catch (error) {
-          console.error('Error fetching specialized new releases:', error);
-          // Continue with regular new releases if specialized fetch fails
-        }
-        
-        // Remove duplicates from specialized new releases
-        const newReleasesIdSet = new Set<number>();
-        const combinedNewReleases: TMDbSearchResult[] = [];
-        
-        // First add specialized new releases (prioritize these)
-        specializedNewReleases.forEach(item => {
-          if (!newReleasesIdSet.has(item.id)) {
-            newReleasesIdSet.add(item.id);
-            combinedNewReleases.push(item);
-          }
-        });
-        
-        // Then add general new releases
-        allNewReleasesItems.forEach(item => {
-          if (!newReleasesIdSet.has(item.id)) {
-            newReleasesIdSet.add(item.id);
-            combinedNewReleases.push(item);
-          }
-        });
-        
-        // Store all new releases for filtering
-        originalNewReleases.current = [...combinedNewReleases];
-        
-        // Filter new releases based on selected category
-        const filteredNewReleasesItems = filterContentByCategory(combinedNewReleases, selectedCategory);
-        setNewReleases(selectedCategory === 'all' ? 
-          combinedNewReleases.slice(0, 10) : 
-          filteredNewReleasesItems.slice(0, 10));
-        
-      } catch (error) {
-        console.error('Failed to fetch initial data:', error);
-        setError('Failed to load content. Please try again.');
-      } finally {
-        setLoading(false);
+        // Set for immediate display
+        setRecommendedItems(highestRatedItems.slice(0, 10));
       }
-    };
+      
+      // *****************************************************
+      // NEW RELEASES SECTION - IMPLEMENTATION WITH 1/10 ANIME RATIO
+      // *****************************************************
+
+      // First get general new releases from trending
+      const allNewReleasesItems = trendingResponse.results.filter((item: any) => {
+        const releaseDate = new Date(item.release_date || item.first_air_date || '');
+        const today = new Date();
+        const monthsAgo = (today.getFullYear() - releaseDate.getFullYear()) * 12 + 
+                          (today.getMonth() - releaseDate.getMonth());
+        
+        // Filter for content from the last 1.5 years (18 months)
+        return monthsAgo <= 18 && item.vote_average >= 6 && (item.vote_count || 0) >= 200;
+      });
+      
+      // Get regular new movies (non-anime, non-documentary)
+      const regularNewMovies = await discoverContent('movie', {
+        sortBy: 'primary_release_date.desc',
+        releaseDateGte: dateThreshold,
+        voteCountGte: 200,
+        voteAverageGte: 6,
+        page: 1
+      });
+      
+      // Get regular new TV shows (non-anime, non-documentary)
+      const regularNewTVShows = await discoverContent('tv', {
+        sortBy: 'first_air_date.desc',
+        releaseDateGte: dateThreshold,
+        voteCountGte: 200,
+        voteAverageGte: 6,
+        page: 1
+      });
+      
+      // Function to identify anime/documentary content
+      const isAnime = (item: TMDbSearchResult) => 
+        item.genre_ids?.includes(16) || (item as any).original_language === 'ja';
+      
+      const isDocumentary = (item: TMDbSearchResult) => 
+        item.genre_ids?.includes(99);
+      
+      // Filter regular content to exclude anime and documentaries
+      const regularMovies = regularNewMovies.results.filter(item => 
+        !isAnime(item) && !isDocumentary(item));
+      
+      const regularTVShows = regularNewTVShows.results.filter(item => 
+        !isAnime(item) && !isDocumentary(item));
+      
+      // Get anime new releases
+      const animeNewReleases = await discoverContent('tv', {
+        genreIds: [16], // Animation genre
+        withOriginalLanguage: 'ja', // Japanese language
+        sortBy: 'first_air_date.desc',
+        releaseDateGte: dateThreshold,
+        voteCountGte: 50, // Reduced from 200 for anime
+        voteAverageGte: 6,
+        page: 1
+      });
+      
+      const animeMovieReleases = await discoverContent('movie', {
+        genreIds: [16], // Animation genre
+        withOriginalLanguage: 'ja',
+        sortBy: 'primary_release_date.desc',
+        releaseDateGte: dateThreshold,
+        voteCountGte: 50, // Reduced from 200 for anime
+        voteAverageGte: 6,
+        page: 1
+      });
+      
+      // Combine all anime content and sort by popularity
+      const allAnimeContent = [
+        ...animeNewReleases.results,
+        ...animeMovieReleases.results
+      ].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+      
+      // Get documentary releases
+      const docReleases = await discoverContent('movie', {
+        genreIds: [99], // Documentary genre
+        sortBy: 'primary_release_date.desc',
+        releaseDateGte: dateThreshold,
+        voteCountGte: 100, // Reduced from 200 for documentaries
+        voteAverageGte: 6,
+        page: 1
+      });
+      
+      const docTVReleases = await discoverContent('tv', {
+        genreIds: [99], // Documentary genre
+        sortBy: 'first_air_date.desc',
+        releaseDateGte: dateThreshold,
+        voteCountGte: 100, // Reduced from 200 for documentaries
+        voteAverageGte: 6,
+        page: 1
+      });
+      
+      // Combine documentary content
+      const allDocContent = [
+        ...docReleases.results,
+        ...docTVReleases.results
+      ].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+      
+      // Combine regular movies and TV shows in alternating pattern
+      const combinedRegularReleases: TMDbSearchResult[] = [];
+      const maxCount = Math.max(regularMovies.length, regularTVShows.length);
+      
+      for (let i = 0; i < maxCount; i++) {
+        if (i < regularMovies.length) {
+          combinedRegularReleases.push(regularMovies[i]);
+        }
+        if (i < regularTVShows.length) {
+          combinedRegularReleases.push(regularTVShows[i]);
+        }
+      }
+      
+      // Now construct the final new releases list with proper ratios
+      // We want 1 anime for every 9 regular items (10% anime)
+      const finalNewReleases: TMDbSearchResult[] = [];
+      const animeContentNeeded = Math.max(1, Math.floor(combinedRegularReleases.length / 9));
+      
+      // Keep track of used IDs to avoid duplicates
+      const usedIds = new Set<number>();
+      
+      // Add regular content
+      combinedRegularReleases.forEach(item => {
+        if (!usedIds.has(item.id)) {
+          finalNewReleases.push(item);
+          usedIds.add(item.id);
+        }
+      });
+      
+      // Calculate anime insertion positions
+      const positions = [];
+      for (let i = 0; i < animeContentNeeded; i++) {
+        // Space them out roughly evenly
+        const pos = Math.floor((i + 1) * (finalNewReleases.length / (animeContentNeeded + 1)));
+        positions.push(pos);
+      }
+      
+      // Insert anime at calculated positions
+      for (let i = 0; i < positions.length && i < allAnimeContent.length; i++) {
+        const anime = allAnimeContent[i];
+        if (!usedIds.has(anime.id)) {
+          // Insert at calculated position (or at end if position exceeds length)
+          const insertPos = Math.min(positions[i], finalNewReleases.length);
+          finalNewReleases.splice(insertPos, 0, anime);
+          usedIds.add(anime.id);
+        }
+      }
+      
+      // Add documentaries (not limited by ratio)
+      allDocContent.forEach(item => {
+        if (!usedIds.has(item.id)) {
+          finalNewReleases.push(item);
+          usedIds.add(item.id);
+        }
+      });
+      
+      // Add any good items from trending that weren't included
+      allNewReleasesItems.forEach(item => {
+        if (!usedIds.has(item.id)) {
+          finalNewReleases.push(item);
+          usedIds.add(item.id);
+        }
+      });
+      
+      // Store for filtering
+      originalNewReleases.current = [...finalNewReleases];
+      
+      // Apply category filtering for display
+      const filteredNewReleases = filterContentByCategory(finalNewReleases, selectedCategory);
+      setNewReleases(filteredNewReleases.slice(0, 10));
+      
+      /*
+       * ************ EXPLANATION OF "FOR YOU" FILTERING ************
+       * 
+       * The "For You" section implements personalized content recommendations:
+       * 
+       * 1. Exclusion Filter: 
+       *    - First, we exclude any content that's already in the user's watchlist or watched list
+       *    - We also exclude the current spotlight item to avoid redundancy
+       * 
+       * 2. User Preferences Analysis:
+       *    - We analyze the user's watchlist and watched history
+       *    - For each genre in the user's watched items, we add 2 points (stronger signal)
+       *    - For each genre in the user's watchlist items, we add 1 point (interest signal)
+       *    - This builds a weighted map of the user's genre preferences
+       * 
+       * 3. Franchise/Series Matching:
+       *    - We boost content that appears to be in the same franchise/series as items the user has watched
+       *    - This is done through title prefix matching
+       *    - Matching items get a significant boost (+3 points)
+       * 
+       * 4. Content Scoring Algorithm:
+       *    Content is scored using the formula:
+       *    Score = (Rating × 2) + Recency Bonus + Popularity Factor + Preference Score
+       *    
+       *    Where:
+       *    - Rating: The content's vote_average (0-10) multiplied by 2
+       *    - Recency Bonus: Up to 3 points for newer content (0-3 years old)
+       *    - Popularity Factor: Up to 2 points based on popularity
+       *    - Preference Score: Points from genre matching and franchise matching
+       * 
+       * 5. Final Sorting:
+       *    - All content is sorted by the calculated score in descending order
+       *    - The top results are presented to the user
+       * 
+       * This creates a personalized recommendation mix that balances:
+       * - Content quality (rating)
+       * - Freshness (recency)
+       * - Popularity (general appeal)
+       * - Personal relevance (genre and franchise matching)
+       */
+    } catch (error) {
+      console.error('Failed to fetch initial data:', error);
+      setError('Failed to load content. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const performSearch = useCallback(
     debounce(async (searchQuery: string) => {
@@ -721,12 +936,24 @@ export default function SearchScreen() {
   const renderMediaItem = (item: TMDbSearchResult, size: 'normal' | 'large' | 'wide' = 'normal') => {
     if (item.media_type === 'person') return null;
 
+    // Ensure media_type is always set - default to 'movie' if missing
+    const mediaType = item.media_type || (item.title ? 'movie' : 'tv');
+    // If item didn't have a media_type, set it now for consistency
+    if (!item.media_type) {
+      item.media_type = mediaType;
+    }
+
     const inWatchlist = isInWatchlist(item.id);
     const inWatched = isInWatched(item.id);
     const title = item.title || item.name || '';
     const year = new Date(item.release_date || item.first_air_date || '').getFullYear();
     const yearText = !isNaN(year) ? year.toString() : '';
     const rating = item.vote_average ? item.vote_average.toFixed(1) : '';
+    const isHighRated = item.vote_average >= 8.0;
+    
+    // Determine if this is a top rated item being shown in the Highest Rated section
+    const isInHighestRatedSection = selectedCategory !== 'all' && 
+      originalHighestRatedItems.current.some(highRatedItem => highRatedItem.id === item.id);
     
     // Adjust dimensions based on size
     let itemWidth = ITEM_WIDTH;
@@ -749,13 +976,15 @@ export default function SearchScreen() {
           { 
             width: itemWidth, 
             height: itemHeight 
-          }
+          },
+          // Add a subtle gold border for highly rated items in the top rated section
+          isInHighestRatedSection && isHighRated && styles.highRatedItemBorder
         ]}
         onPress={() => {
           router.push({
             pathname: '/details/[type]/[id]',
             params: { 
-              type: item.media_type || 'movie', 
+              type: mediaType, 
               id: item.id.toString() 
             }
           });
@@ -788,12 +1017,12 @@ export default function SearchScreen() {
         {/* Media Type Indicator (Movie/TV) */}
         {item.id !== spotlightItem?.id && (
           <View style={styles.mediaTypeIndicator}>
-            {item.media_type === 'movie' ? 
+            {mediaType === 'movie' ? 
               <Film size={12} color="#fff" /> : 
               <Tv size={12} color="#fff" />
             }
             <Text style={styles.mediaTypeText}>
-              {item.media_type === 'movie' ? 'Movie' : 'TV'}
+              {mediaType === 'movie' ? 'Movie' : 'TV'}
             </Text>
           </View>
         )}
@@ -804,9 +1033,16 @@ export default function SearchScreen() {
           <View style={styles.mediaItemMetaColumn}>
             <Text style={styles.mediaItemYear}>{yearText}</Text>
             {rating ? (
-              <View style={styles.mediaItemRating}>
+              <View style={[
+                styles.mediaItemRating,
+                // Enhance the rating display for top rated items
+                isInHighestRatedSection && isHighRated && styles.enhancedRating
+              ]}>
                 <Star size={12} color="#FFD700" fill="#FFD700" />
-                <Text style={styles.mediaItemRatingText}>{rating}</Text>
+                <Text style={[
+                  styles.mediaItemRatingText,
+                  isInHighestRatedSection && isHighRated && { fontWeight: '700' }
+                ]}>{rating}</Text>
               </View>
             ) : null}
           </View>
@@ -1020,6 +1256,9 @@ export default function SearchScreen() {
     if (title === 'For You' && selectedCategory !== 'all') {
       displayTitle = 'Highest Rated';
     }
+    
+    // Display ratings more prominently for Highest Rated items
+    const isHighestRated = displayTitle === 'Highest Rated';
     
     return (
       <View style={styles.sectionContainer}>
@@ -1574,5 +1813,45 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     marginLeft: 4,
+  },
+  topRatedBadge: {
+    position: 'absolute',
+    top: 10,
+    left: 10,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#FFD700',
+    ...getElevation(3),
+  },
+  topRatedBadgeText: {
+    color: '#FFD700',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 4,
+  },
+  topRatedBadgeMediaType: {
+    color: '#ccc',
+    fontSize: 12,
+    fontWeight: '500',
+    marginLeft: 4,
+  },
+  highRatedItemBorder: {
+    borderWidth: 2,
+    borderColor: '#FFD700',
+    ...getElevation(5),
+  },
+  enhancedRating: {
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    borderRadius: 8,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderWidth: 1,
+    borderColor: '#FFD700',
   },
 });

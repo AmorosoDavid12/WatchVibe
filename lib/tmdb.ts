@@ -14,6 +14,7 @@ export interface TMDbSearchResult {
   release_date?: string;
   first_air_date?: string;
   vote_average: number;
+  vote_count?: number;
   media_type: 'movie' | 'tv' | 'person';
   genre_ids?: number[];
   popularity?: number;
@@ -86,11 +87,14 @@ export function formatSearchResult(result: TMDbSearchResult) {
     return null;
   }
 
+  // If media_type is missing, infer it from whether it has a title (movie) or name (tv)
+  const mediaType = result.media_type || (result.title ? 'movie' : 'tv');
+
   return {
     id: result.id,
     title: result.title || result.name || '',
     poster_path: result.poster_path || 'https://via.placeholder.com/342x513?text=No+Poster',
-    media_type: result.media_type,
+    media_type: mediaType,
     release_date: result.release_date || result.first_air_date || '',
     vote_average: result.vote_average,
     genre_ids: result.genre_ids || [],
@@ -504,4 +508,33 @@ export async function getHighestRated(
     voteAverageGte: 7.0, // Get high quality content
     page
   });
+}
+
+// Get top rated movies or TV shows directly from the top_rated endpoint
+export async function getTopRated(
+  mediaType: 'movie' | 'tv',
+  page: number = 1
+): Promise<TMDbSearchResponse> {
+  const url = `${BASE_URL}/${mediaType}/top_rated?api_key=${TMDB_API_KEY}&language=en-US&page=${page}`;
+
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    const error = await response.json();
+    console.error('TMDb API Error:', error);
+    throw new Error(`Failed to fetch top rated ${mediaType}: ${error.status_message || response.statusText}`);
+  }
+
+  const data = await response.json();
+
+  // Add media_type to each result since the top_rated endpoint doesn't include it
+  const results = data.results.map((item: any) => ({
+    ...item,
+    media_type: mediaType // Explicitly set the media_type based on the endpoint we called
+  }));
+
+  return {
+    ...data,
+    results
+  };
 } 
