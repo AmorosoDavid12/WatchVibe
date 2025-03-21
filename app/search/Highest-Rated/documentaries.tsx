@@ -1,19 +1,17 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, ActivityIndicator, Text, ScrollView } from 'react-native';
-import { getTopRated, discoverContent, getTrending, TMDbSearchResult } from '../../../lib/tmdb';
+import { View, StyleSheet, ActivityIndicator, Text } from 'react-native';
+import { getTopRated, discoverContent, TMDbSearchResult } from '../../../lib/tmdb';
 
 // Import the MediaGrid component by relative path
 import MediaGrid from './MediaGrid';
 
 export default function HighestRatedDocumentaries() {
   const [documentaries, setDocumentaries] = useState<TMDbSearchResult[]>([]);
-  const [trendingDocumentaries, setTrendingDocumentaries] = useState<TMDbSearchResult[]>([]);
-  const [newReleaseDocumentaries, setNewReleaseDocumentaries] = useState<TMDbSearchResult[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    async function fetchAllDocumentaries() {
+    async function fetchHighestRatedDocumentaries() {
       try {
         setLoading(true);
         setError(null);
@@ -68,92 +66,6 @@ export default function HighestRatedDocumentaries() {
         }
         
         setDocumentaries(sortedDocumentaries);
-        
-        // 2. FETCH TRENDING DOCUMENTARIES
-        // Use trending movies and filter for documentaries
-        const trendingMovies = await getTrending('week', 'movie', 1, 'en-US');
-        const trendingTV = await getTrending('week', 'tv', 1, 'en-US');
-        
-        // Combine results and filter for documentaries
-        const allTrendingContent = [
-          ...trendingMovies.results.map(movie => ({ ...movie, media_type: 'movie' as const })),
-          ...trendingTV.results.map(show => ({ ...show, media_type: 'tv' as const }))
-        ].filter(item => item.genre_ids?.includes(99));
-        
-        // If not enough trending documentaries, use documentary discover with popularity sort
-        if (allTrendingContent.length < 8) {
-          const popularDocs = await discoverContent('movie', {
-            genreIds: [99],
-            sortBy: 'popularity.desc',
-            voteCountGte: 50,
-            page: 1
-          });
-          
-          const tvDocs = await discoverContent('tv', {
-            genreIds: [99],
-            sortBy: 'popularity.desc',
-            voteCountGte: 30,
-            page: 1
-          });
-          
-          // Combine results
-          const moreTrendingDocs = [
-            ...popularDocs.results.map(movie => ({ ...movie, media_type: 'movie' as const })),
-            ...tvDocs.results.map(show => ({ ...show, media_type: 'tv' as const }))
-          ];
-          
-          // Add unique items
-          moreTrendingDocs.forEach(item => {
-            if (!allTrendingContent.some(existing => existing.id === item.id)) {
-              allTrendingContent.push(item);
-            }
-          });
-        }
-        
-        // Sort by popularity
-        const sortedTrending = allTrendingContent.sort((a, b) => 
-          (b.popularity || 0) - (a.popularity || 0)
-        );
-        
-        setTrendingDocumentaries(sortedTrending);
-        
-        // 3. FETCH NEW RELEASE DOCUMENTARIES
-        // Get recent documentary releases using the discover API
-        const today = new Date();
-        const sixMonthsAgo = new Date();
-        sixMonthsAgo.setMonth(today.getMonth() - 6);
-        const dateThreshold = sixMonthsAgo.toISOString().split('T')[0];
-        
-        const newReleaseMovieDocs = await discoverContent('movie', {
-          genreIds: [99],
-          sortBy: 'primary_release_date.desc',
-          releaseDateGte: dateThreshold,
-          voteCountGte: 20,
-          page: 1
-        });
-        
-        const newReleaseTVDocs = await discoverContent('tv', {
-          genreIds: [99],
-          sortBy: 'first_air_date.desc',
-          releaseDateGte: dateThreshold,
-          voteCountGte: 10,
-          page: 1
-        });
-        
-        // Combine results
-        const allNewReleases = [
-          ...newReleaseMovieDocs.results.map(movie => ({ ...movie, media_type: 'movie' as const })),
-          ...newReleaseTVDocs.results.map(show => ({ ...show, media_type: 'tv' as const }))
-        ];
-        
-        // Sort by release date (newest first)
-        const sortedNewReleases = allNewReleases.sort((a, b) => {
-          const dateA = new Date(a.release_date || a.first_air_date || '');
-          const dateB = new Date(b.release_date || b.first_air_date || '');
-          return dateB.getTime() - dateA.getTime();
-        });
-        
-        setNewReleaseDocumentaries(sortedNewReleases);
       } catch (err) {
         console.error('Error fetching documentaries:', err);
         setError('Failed to load documentaries. Please try again.');
@@ -162,7 +74,7 @@ export default function HighestRatedDocumentaries() {
       }
     }
     
-    fetchAllDocumentaries();
+    fetchHighestRatedDocumentaries();
   }, []);
 
   if (loading) {
@@ -184,22 +96,7 @@ export default function HighestRatedDocumentaries() {
 
   return (
     <View style={styles.container}>
-      <ScrollView>
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Highest Rated Documentaries</Text>
-          <MediaGrid data={documentaries} isHighestRatedSection={true} />
-        </View>
-        
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Trending Documentaries</Text>
-          <MediaGrid data={trendingDocumentaries} isHighestRatedSection={false} />
-        </View>
-        
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>New Documentaries</Text>
-          <MediaGrid data={newReleaseDocumentaries} isHighestRatedSection={false} />
-        </View>
-      </ScrollView>
+      <MediaGrid data={documentaries} isHighestRatedSection={true} />
     </View>
   );
 }
@@ -208,6 +105,7 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#121212',
+    paddingBottom: 59,
   },
   centered: {
     flex: 1,
@@ -225,15 +123,5 @@ const styles = StyleSheet.create({
     color: '#ff5252',
     fontSize: 16,
     textAlign: 'center',
-  },
-  section: {
-    marginBottom: 24,
-  },
-  sectionTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginHorizontal: 16,
-    marginBottom: 12,
   },
 }); 

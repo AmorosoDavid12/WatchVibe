@@ -139,13 +139,7 @@ export default function SearchScreen() {
     if (category === 'all') return items;
     
     return items.filter(item => {
-      // Ensure media_type is defined - infer from properties if missing
-      const mediaType = item.media_type || (item.title ? 'movie' : 'tv');
-      
-      // If media_type was missing, set it now for consistency
-      if (!item.media_type) {
-        item.media_type = mediaType;
-      }
+      const mediaType = item.media_type;
       
       if (category === 'movies') {
         // For movies, must be movie type AND not animation genre (16) AND preferably English
@@ -204,10 +198,13 @@ export default function SearchScreen() {
     }
     
     // Use original data stored in refs for filtering
-    const filteredTrending = filterContentByCategory(originalTrendingItems.current, selectedCategory);
-    setTrendingItems(selectedCategory === 'all' ? 
-      originalTrendingItems.current.slice(0, 10) : 
-      filteredTrending.slice(0, 10));
+    const filteredTrendingItems = filterContentByCategory(originalTrendingItems.current, selectedCategory);
+    
+    if (selectedCategory !== 'documentaries') {
+      setTrendingItems(selectedCategory === 'all' ? 
+        originalTrendingItems.current.slice(0, 10) : 
+        filteredTrendingItems.slice(0, 10));
+    }
     
     // Filter new releases
     const filteredNewReleases = filterContentByCategory(originalNewReleases.current, selectedCategory);
@@ -320,16 +317,59 @@ export default function SearchScreen() {
       // Store trending items for filtering operations
       originalTrendingItems.current = [...trendingResponse.results];
       
-      // Apply category filtering
-      const filteredTrendingItems = filterContentByCategory(trendingResponse.results, selectedCategory);
-      setTrendingItems(selectedCategory === 'all' ? 
-        trendingResponse.results.slice(0, 10) : 
-        filteredTrendingItems.slice(0, 10));
+      // For documentaries category, specifically fetch more documentary content for trending
+      if (selectedCategory === 'documentaries') {
+        // Get documentary movies with good popularity
+        const trendingDocMovies = await discoverContent('movie', {
+          genreIds: [99],
+          sortBy: 'popularity.desc',
+          voteCountGte: 50,
+          page: 1
+        });
+        
+        // Ensure media_type is set
+        trendingDocMovies.results.forEach(item => {
+          item.media_type = 'movie';
+        });
+        
+        // Get documentary TV shows with good popularity
+        const trendingDocTV = await discoverContent('tv', {
+          genreIds: [99],
+          sortBy: 'popularity.desc',
+          voteCountGte: 30,
+          page: 1
+        });
+        
+        // Ensure media_type is set
+        trendingDocTV.results.forEach(item => {
+          item.media_type = 'tv';
+        });
+        
+        // Combine all documentary trending content and sort by popularity
+        const combinedTrendingDocs = [
+          ...trendingDocMovies.results,
+          ...trendingDocTV.results
+        ].sort((a, b) => (b.popularity || 0) - (a.popularity || 0));
+        
+        // Set trending items directly to documentary content
+        setTrendingItems(combinedTrendingDocs);
+      } else {
+        // Normal trending filtering for other categories
+        const filteredTrendingItems = filterContentByCategory(trendingResponse.results, selectedCategory);
+        setTrendingItems(selectedCategory === 'all' ? 
+          trendingResponse.results.slice(0, 10) : 
+          filteredTrendingItems.slice(0, 10));
+      }
       
       // Set spotlight item with improved criteria
       const twoYearsAgo = currentYear - 2;
       
-      const spotlightCandidates = filteredTrendingItems
+      // Use appropriate collection for spotlight candidates based on category
+      const spotlightItems = selectedCategory === 'documentaries' 
+        ? trendingItems 
+        : filterContentByCategory(trendingResponse.results, selectedCategory);
+        
+      const spotlightCandidates = spotlightItems
         .filter(item => 
           (selectedCategory === 'all' || selectedCategory === 'movies' ? item.media_type === 'movie' : true) && 
           item.backdrop_path && 
@@ -615,6 +655,26 @@ export default function SearchScreen() {
             });
             highestRatedItems = docDiscover.results;
           }
+          
+          // For documentaries section, we also want to add TV documentaries
+          // Get more top-rated TV shows and filter for documentaries
+          const moreTVShows = await getTopRated('tv', 2);
+          moreTVShows.results.forEach(item => {
+            item.media_type = 'tv';
+          });
+          
+          const tvDocsFiltered = [...topRatedTVShows.results, ...moreTVShows.results]
+            .filter(item => item.genre_ids?.includes(99))
+            .sort((a, b) => b.vote_average - a.vote_average);
+          
+          // Combine movie and TV documentaries
+          tvDocsFiltered.forEach(item => {
+            (item as any)._source = 'top_rated_tv_docs_filtered';
+          });
+          
+          // Merge and sort all documentaries by rating
+          highestRatedItems = [...highestRatedItems, ...tvDocsFiltered]
+            .sort((a, b) => b.vote_average - a.vote_average);
         }
         
         // Filter out any items without media_type
@@ -656,6 +716,58 @@ export default function SearchScreen() {
           uniqueNewReleases.add(item.id);
           item.media_type = 'tv'; // Ensure media type is set
           finalNewReleases.push(item);
+        }
+      }
+      
+      // ADD TV documentaries if needed
+      if (selectedCategory === 'documentaries') {
+        // Define date threshold for new releases
+        const today = new Date();
+        const sixMonthsAgo = new Date();
+        sixMonthsAgo.setMonth(today.getMonth() - 6);
+      
+        // Get documentary TV shows
+        const tvDocumentaries = await discoverContent('tv', {
+          genreIds: [99],
+          sortBy: 'first_air_date.desc',
+          releaseDateGte: sixMonthsAgo.toISOString().split('T')[0],
+          voteCountGte: 10,
+          page: 1
+        });
+        
+        // Ensure media_type is set
+        tvDocumentaries.results.forEach(item => {
+          item.media_type = 'tv';
+        });
+        
+        // Add to new releases if they have the documentary genre
+        for (const item of tvDocumentaries.results) {
+          if (!uniqueNewReleases.has(item.id) && item.genre_ids?.includes(99)) {
+            uniqueNewReleases.add(item.id);
+            finalNewReleases.push(item);
+          }
+        }
+        
+        // Also get documentary movies
+        const movieDocumentaries = await discoverContent('movie', {
+          genreIds: [99],
+          sortBy: 'primary_release_date.desc',
+          releaseDateGte: sixMonthsAgo.toISOString().split('T')[0],
+          voteCountGte: 20,
+          page: 1
+        });
+        
+        // Ensure media_type is set
+        movieDocumentaries.results.forEach(item => {
+          item.media_type = 'movie';
+        });
+        
+        // Add to new releases
+        for (const item of movieDocumentaries.results) {
+          if (!uniqueNewReleases.has(item.id)) {
+            uniqueNewReleases.add(item.id);
+            finalNewReleases.push(item);
+          }
         }
       }
       
@@ -1254,7 +1366,11 @@ export default function SearchScreen() {
     const twoYearsAgo = currentYear - 2;
     
     // Use same criteria as in fetchInitialData
-    const spotlightCandidates = trendingItems
+    const spotlightItems = selectedCategory === 'documentaries' 
+      ? trendingItems 
+      : filterContentByCategory(trendingItems, selectedCategory);
+      
+    const spotlightCandidates = spotlightItems
       .filter(item => 
         (selectedCategory === 'all' || selectedCategory === 'movies' ? item.media_type === 'movie' : true) && 
         item.backdrop_path && 
