@@ -13,6 +13,8 @@ import {
   StatusBar,
   Animated,
   Platform,
+  Pressable,
+  Modal,
 } from 'react-native';
 import { useWatchlistStore, WatchlistItem } from '../../lib/watchlistStore';
 import { searchContent, formatSearchResult, TMDbSearchResult, getTrending, getMovieDetails, discoverContent, getTopRated } from '../../lib/tmdb';
@@ -21,6 +23,11 @@ import { useRouter } from 'expo-router';
 import { debounce } from 'lodash';
 import Toast from 'react-native-toast-message';
 import { useWatchedStore, WatchedItem } from '@/lib/watchedStore';
+import { supabase, getCurrentSession } from '@/lib/supabase';
+import { Session } from '@supabase/supabase-js';
+
+
+
 
 const { width, height } = Dimensions.get('window');
 const COLUMN_COUNT = 2;
@@ -64,6 +71,9 @@ export default function SearchScreen() {
   const [searchLoading, setSearchLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // Track the current user ID to prevent issues when switching accounts
+  const currentUserIdRef = useRef<string | null>(null);
+  
   // Store original data for filtering operations
   const originalTrendingItems = useRef<TMDbSearchResult[]>([]);
   const originalRecommendedItems = useRef<TMDbSearchResult[]>([]);
@@ -106,32 +116,87 @@ export default function SearchScreen() {
   useEffect(() => {
     try {
       if (typeof window !== 'undefined') {
-        // Restore search query and state
-        const savedQuery = localStorage.getItem('search_query') || '';
-        const searchActive = localStorage.getItem('search_active') === 'true';
-        const savedCategory = localStorage.getItem('selected_category') as CategoryType | null;
-        
-        if (savedQuery) {
-          setQuery(savedQuery);
-          setIsSearchActive(searchActive);
+        // First check current user session
+        getCurrentSession().then((session: Session | null) => {
+          const userId = session?.user?.id || null;
+          currentUserIdRef.current = userId;
           
-          // If previously in search mode, re-perform the search
-          if (searchActive) {
-            performSearch(savedQuery);
+          // Only restore search state if we have an authenticated user
+          if (userId) {
+            // Restore search query and state
+            const savedQuery = localStorage.getItem('search_query') || '';
+            const searchActive = localStorage.getItem('search_active') === 'true';
+            const savedCategory = localStorage.getItem('selected_category') as CategoryType | null;
+            
+            if (savedQuery) {
+              setQuery(savedQuery);
+              setIsSearchActive(searchActive);
+              
+              // If previously in search mode, re-perform the search
+              if (searchActive) {
+                performSearch(savedQuery);
+              }
+            } else {
+              // Explicitly set to empty string to avoid any default characters
+              setQuery('');
+            }
+            
+            // Restore category selection
+            if (savedCategory) {
+              setSelectedCategory(savedCategory);
+            }
           }
-        } else {
-          // Explicitly set to empty string to avoid any default characters
-          setQuery('');
-        }
-        
-        // Restore category selection
-        if (savedCategory) {
-          setSelectedCategory(savedCategory);
-        }
+        }).catch((error: Error) => {
+          console.error('Error checking session:', error);
+        });
       }
     } catch (e) {
       console.error('Error restoring search state:', e);
     }
+  }, []);
+
+  // Check for user changes to reset search state
+  useEffect(() => {
+    const checkUserChanges = () => {
+      const authStateChangeHandler = supabase.auth.onAuthStateChange(
+        async (event, session: Session | null) => {
+          if (event === 'SIGNED_IN' || event === 'SIGNED_OUT') {
+            const userId = session?.user?.id || null;
+            
+            // If user has changed, reset search state
+            if (currentUserIdRef.current !== userId) {
+              console.log('User changed, resetting search state');
+              setQuery('');
+              setIsSearchActive(false);
+              setSelectedCategory('all');
+              
+              // Clear localStorage entries for search
+              if (typeof window !== 'undefined') {
+                localStorage.removeItem('search_query');
+                localStorage.removeItem('search_active');
+                localStorage.removeItem('selected_category');
+              }
+              
+              // Update user reference
+              currentUserIdRef.current = userId;
+            }
+          }
+        }
+      );
+      
+      // Return cleanup function
+      return () => {
+        authStateChangeHandler.data.subscription.unsubscribe();
+      };
+    };
+    
+    // Set up the listener
+    const unsubscribe = checkUserChanges();
+    
+    // Cleanup on unmount
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Function to filter content based on selected category

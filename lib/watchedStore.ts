@@ -19,11 +19,13 @@ interface WatchedState {
   isInitialized: boolean;
   syncInProgress: boolean;
   lastSyncTime: number;
+  lastSyncUserId: string | null;
   addItem: (item: WatchedItem) => boolean;
   removeItem: (id: number) => void;
   reorderItems: (items: WatchedItem[]) => void;
   hasItem: (id: number) => boolean;
   syncWithSupabase: () => Promise<boolean>;
+  resetStore: () => void;
 }
 
 // Use the same table as watchlist but with a different type
@@ -38,6 +40,7 @@ export const useWatchedStore = create<WatchedState>()(
       isInitialized: false,
       syncInProgress: false,
       lastSyncTime: 0,
+      lastSyncUserId: null,
       addItem: (item: WatchedItem) => {
         // First update local state immediately for UI responsiveness
         const exists = get().hasItem(item.id);
@@ -59,11 +62,15 @@ export const useWatchedStore = create<WatchedState>()(
               return;
             }
             
-            console.log('Adding to watched list:', { id: item.id, title: item.title });
+            const userId = session.user.id;
+            // Update user ID reference to ensure we're syncing for the correct user
+            set(state => ({ ...state, lastSyncUserId: userId }));
+            
+            console.log('Adding to watched list:', { id: item.id, title: item.title, userId });
             
             // Use a simple approach with a basic table structure
             const result = await supabase.from(TABLE_NAME).upsert({
-              user_id: session.user.id,
+              user_id: userId,
               // Make the key unique by combining user_id, item_id and type
               item_key: `watched_${item.id}`,
               // Store the item as a JSON string in a 'value' column
@@ -77,7 +84,7 @@ export const useWatchedStore = create<WatchedState>()(
             if (result.error) {
               console.error('Error adding to watched list:', result.error);
             } else {
-              console.log(`Added item ${item.id} to watched list for user ${session.user.id}`);
+              console.log(`Added item ${item.id} to watched list for user ${userId}`);
             }
           } catch (error) {
             console.error('Error syncing watched item:', error);
@@ -102,7 +109,11 @@ export const useWatchedStore = create<WatchedState>()(
               return;
             }
             
-            console.log(`Removing item ${id} from watched list for user ${session.user.id}`);
+            const userId = session.user.id;
+            // Update user ID reference to ensure we're syncing for the correct user
+            set(state => ({ ...state, lastSyncUserId: userId }));
+            
+            console.log(`Removing item ${id} from watched list for user ${userId}`);
             
             // Create a timeout promise
             const timeoutPromise = new Promise((resolve) => 
@@ -117,7 +128,7 @@ export const useWatchedStore = create<WatchedState>()(
               .from(TABLE_NAME)
               .delete()
               .match({ 
-                user_id: session.user.id,
+                user_id: userId,
                 item_key: `watched_${id}`,
                 type: 'watched'
               });
@@ -130,7 +141,7 @@ export const useWatchedStore = create<WatchedState>()(
             if (result.error) {
               console.error('Error removing from watched list:', result.error);
             } else {
-              console.log(`Successfully removed item ${id} from watched list in database`);
+              console.log(`Successfully removed item ${id} from watched list in database for user ${userId}`);
             }
           } catch (error) {
             console.error('Error syncing watched removal:', error);
@@ -147,6 +158,16 @@ export const useWatchedStore = create<WatchedState>()(
       hasItem: (id) => {
         return get().items.some((item) => item.id === id);
       },
+      resetStore: () => {
+        set({
+          items: [],
+          isLoading: false,
+          isInitialized: false,
+          syncInProgress: false,
+          lastSyncTime: 0,
+          lastSyncUserId: null
+        });
+      },
       syncWithSupabase: async () => {
         // First check if we are already syncing or synced recently
         const state = get();
@@ -157,30 +178,43 @@ export const useWatchedStore = create<WatchedState>()(
           return false;
         }
         
-        // Prevent excessive syncing
-        if (now - state.lastSyncTime < MIN_SYNC_INTERVAL && state.isInitialized) {
-          console.log('Watched list synced recently, skipping');
+        // Check for an authenticated session
+        const session = await getCurrentSession();
+        if (!session?.user) {
+          console.log('No authenticated user found, skipping Supabase sync');
+          set({ 
+            isLoading: false, 
+            isInitialized: true,
+            syncInProgress: false,
+            lastSyncTime: now
+          });
+          return false;
+        }
+        
+        const userId = session.user.id;
+        const userChanged = state.lastSyncUserId !== null && state.lastSyncUserId !== userId;
+        
+        // Only prevent sync if it's the same user and we've synced recently
+        if (!userChanged && now - state.lastSyncTime < MIN_SYNC_INTERVAL && state.isInitialized) {
+          console.log('Watched list synced recently for same user, skipping');
           return true;
+        }
+        
+        // If user changed, we need to reset and sync
+        if (userChanged) {
+          console.log('User changed since last watched list sync, forcing refresh');
+          // Reset items but keep loading state to avoid UI flicker
+          set({ 
+            items: [],
+            isInitialized: false
+          });
         }
         
         try {
           // Set loading and sync in progress state
           set({ isLoading: true, syncInProgress: true });
-          
-          // Check for an authenticated session
-          const session = await getCurrentSession();
-          if (!session?.user) {
-            console.log('No authenticated user found, skipping Supabase sync');
-            set({ 
-              isLoading: false, 
-              isInitialized: true,
-              syncInProgress: false,
-              lastSyncTime: now
-            });
-            return false;
-          }
 
-          console.log('Syncing watched list with Supabase');
+          console.log('Syncing watched list with Supabase for user:', userId);
           
           // Create a timeout promise - increased to 8 seconds
           const timeoutPromise = new Promise((resolve) => 
@@ -194,7 +228,7 @@ export const useWatchedStore = create<WatchedState>()(
           const fetchPromise = supabase
             .from(TABLE_NAME)
             .select('*')
-            .eq('user_id', session.user.id)
+            .eq('user_id', userId)
             .eq('type', 'watched')
             .order('updated_at', { ascending: false });
           
@@ -209,25 +243,27 @@ export const useWatchedStore = create<WatchedState>()(
               isLoading: false, 
               isInitialized: true,
               syncInProgress: false,
-              lastSyncTime: now
+              lastSyncTime: now,
+              lastSyncUserId: userId
             });
             return false;
           }
           
-          // If we get no data (but no error either), keep existing items to prevent flickering
-          // This is common when connection issues occur but isn't a critical failure
+          // If we get no data (but no error either), just update the state with empty array
           if (!data || data.length === 0) {
-            console.log('No watched data received, maintaining existing items');
+            console.log('No watched data received, setting empty items list');
             set({ 
+              items: [],
               isLoading: false, 
               isInitialized: true,
               syncInProgress: false,
-              lastSyncTime: now
+              lastSyncTime: now,
+              lastSyncUserId: userId
             });
-            return true; // No data is not an error
+            return true;
           }
 
-          console.log(`Fetched ${data.length} watched items from Supabase`);
+          console.log(`Fetched ${data.length} watched items from Supabase for user:`, userId);
           
           // Parse JSON from value field
           const items = data.map((row: any) => {
@@ -245,7 +281,8 @@ export const useWatchedStore = create<WatchedState>()(
             isLoading: false, 
             isInitialized: true,
             syncInProgress: false,
-            lastSyncTime: now
+            lastSyncTime: now,
+            lastSyncUserId: userId
           });
           
           return true;
@@ -256,7 +293,8 @@ export const useWatchedStore = create<WatchedState>()(
             isLoading: false, 
             isInitialized: true,
             syncInProgress: false,
-            lastSyncTime: now
+            lastSyncTime: now,
+            lastSyncUserId: session.user.id
           });
           return false;
         }

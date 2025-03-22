@@ -17,11 +17,13 @@ interface WatchlistState {
   isInitialized: boolean;
   syncInProgress: boolean;
   lastSyncTime: number;
+  lastSyncUserId: string | null;
   addItem: (item: WatchlistItem) => Promise<boolean>;
   removeItem: (id: number) => Promise<boolean>;
   reorderItems: (items: WatchlistItem[]) => void;
   hasItem: (id: number) => boolean;
   syncWithSupabase: () => Promise<boolean>;
+  resetStore: () => void;
 }
 
 // Minimum time between syncs to prevent excessive API calls
@@ -36,6 +38,7 @@ export const useWatchlistStore = create<WatchlistState>()(
       isInitialized: false,
       syncInProgress: false,
       lastSyncTime: 0,
+      lastSyncUserId: null,
       
       // Add item with server-first approach
       addItem: async (item: WatchlistItem) => {
@@ -54,8 +57,14 @@ export const useWatchlistStore = create<WatchlistState>()(
             return false;
           }
           
+          const userId = session.user.id;
+          // Update user ID reference to ensure we're syncing for the correct user
+          set(state => ({ ...state, lastSyncUserId: userId }));
+          
+          console.log('Adding to watchlist:', { id: item.id, title: item.title, userId });
+          
           // Save to server first
-          const success = await saveUserItem(session.user.id, item, 'watchlist');
+          const success = await saveUserItem(userId, item, 'watchlist');
           
           // Only update local state if server update was successful
           if (success) {
@@ -83,8 +92,14 @@ export const useWatchlistStore = create<WatchlistState>()(
             return false;
           }
           
+          const userId = session.user.id;
+          // Update user ID reference to ensure we're syncing for the correct user
+          set(state => ({ ...state, lastSyncUserId: userId }));
+          
+          console.log(`Removing item ${id} from watchlist for user ${userId}`);
+          
           // Remove from server first
-          const success = await removeUserItem(session.user.id, id, 'watchlist');
+          const success = await removeUserItem(userId, id, 'watchlist');
           
           // Only update local state if server update was successful
           if (success) {
@@ -109,6 +124,18 @@ export const useWatchlistStore = create<WatchlistState>()(
         return get().items.some((item) => item.id === id);
       },
       
+      // Reset store completely (for logout/account switching)
+      resetStore: () => {
+        set({
+          items: [],
+          isLoading: false,
+          isInitialized: false,
+          syncInProgress: false,
+          lastSyncTime: 0,
+          lastSyncUserId: null
+        });
+      },
+      
       // Sync with Supabase - always fetch from server
       syncWithSupabase: async () => {
         // First check if we are already syncing or synced recently
@@ -120,50 +147,53 @@ export const useWatchlistStore = create<WatchlistState>()(
           return false;
         }
         
-        // Prevent excessive syncing
-        if (now - state.lastSyncTime < MIN_SYNC_INTERVAL && state.isInitialized) {
-          console.log('Watchlist synced recently, skipping');
+        // Get session to check user ID first
+        const session = await getCurrentSession();
+        if (!session?.user) {
+          console.log('No authenticated user found, skipping watchlist sync');
+          set({ 
+            isLoading: false, 
+            isInitialized: true,
+            syncInProgress: false,
+            lastSyncTime: now
+          });
+          return false;
+        }
+        
+        const userId = session.user.id;
+        const userChanged = state.lastSyncUserId !== null && state.lastSyncUserId !== userId;
+        
+        // Always sync if user has changed
+        if (!userChanged && now - state.lastSyncTime < MIN_SYNC_INTERVAL && state.isInitialized) {
+          console.log('Watchlist synced recently for same user, skipping');
           return true;
+        }
+        
+        // If user changed, we need to reset and sync
+        if (userChanged) {
+          console.log('User changed since last watchlist sync, forcing refresh');
+          // Reset items but keep loading state to avoid UI flicker
+          set({ 
+            items: [],
+            isInitialized: false
+          });
         }
         
         // Set loading and sync in progress state
         set({ isLoading: true, syncInProgress: true });
         
         try {
-          const session = await getCurrentSession();
-          if (!session?.user) {
-            set({ 
-              isLoading: false, 
-              isInitialized: true,
-              syncInProgress: false,
-              lastSyncTime: now
-            });
-            return false;
-          }
-          
           // Fetch items from server with retry built into fetchUserItems
-          const items = await fetchUserItems(session.user.id, 'watchlist');
+          const items = await fetchUserItems(userId, 'watchlist');
           
-          // If we get an empty array but no error, keep existing items to prevent flickering
-          // Only update with empty array on the initial sync
-          if (items.length === 0 && state.isInitialized && state.items.length > 0) {
-            console.log('No watchlist data received, maintaining existing items');
-            set({ 
-              isLoading: false, 
-              isInitialized: true,
-              syncInProgress: false,
-              lastSyncTime: now
-            });
-            return true;
-          }
-          
-          // Update state with fetched items
+          // Update state with fetched items and current user ID
           set({ 
             items,
             isLoading: false,
             isInitialized: true,
             syncInProgress: false,
-            lastSyncTime: now
+            lastSyncTime: now,
+            lastSyncUserId: userId
           });
           
           return true;
@@ -173,7 +203,8 @@ export const useWatchlistStore = create<WatchlistState>()(
             isLoading: false, 
             isInitialized: true,
             syncInProgress: false,
-            lastSyncTime: now
+            lastSyncTime: now,
+            lastSyncUserId: userId
           });
           return false;
         }

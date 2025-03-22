@@ -29,12 +29,17 @@ export default function useAuth() {
   const lastSyncTimeRef = useRef<number>(0);
   const MIN_SYNC_INTERVAL = 10000; // 10 seconds minimum between syncs
   
+  // Keep track of current user ID to prevent syncing for wrong user
+  const currentUserIdRef = useRef<string | null>(null);
+  
   // Keep reference to active subscription
   const authSubscriptionRef = useRef<{ unsubscribe: () => void } | null>(null);
   
   // Get the sync functions from stores
   const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
   const syncWatched = useWatchedStore(state => state.syncWithSupabase);
+  const resetWatchlist = useWatchlistStore(state => state.resetStore);
+  const resetWatched = useWatchedStore(state => state.resetStore);
 
   // Function to sync all data with throttling
   const syncAllData = async (force = false) => {
@@ -46,7 +51,27 @@ export default function useAuth() {
         return true;
       }
       
-      console.log('Starting data synchronization');
+      // Get current session to check user ID
+      const session = await getCurrentSession();
+      if (!session?.user) {
+        console.log('No authenticated user found, skipping sync');
+        return false;
+      }
+      
+      // If user ID has changed, force a refresh
+      const userId = session.user.id;
+      const userChanged = currentUserIdRef.current !== null && currentUserIdRef.current !== userId;
+      
+      if (userChanged) {
+        console.log('User changed, resetting stores before sync');
+        resetWatchlist();
+        resetWatched();
+      }
+      
+      // Update current user reference
+      currentUserIdRef.current = userId;
+      
+      console.log('Starting data synchronization for user:', userId);
       lastSyncTimeRef.current = now;
       
       // Create a promise that rejects after a timeout to avoid getting stuck
@@ -68,7 +93,7 @@ export default function useAuth() {
         ]),
         timeoutPromise
       ]);
-      console.log('Data synchronization completed');
+      console.log('Data synchronization completed for user:', userId);
       return true;
     } catch (error) {
       console.error('Error syncing data:', error);
@@ -294,6 +319,27 @@ export default function useAuth() {
           authSubscriptionRef.current = subscription;
         }
         
+        // Handle user changes and logout
+        if (event === 'SIGNED_IN') {
+          // Check if user has changed
+          const newUserId = session?.user?.id;
+          const userChanged = currentUserIdRef.current !== null && currentUserIdRef.current !== newUserId;
+          
+          if (userChanged || !currentUserIdRef.current) {
+            console.log(`User changed or new login, resetting stores`);
+            resetWatchlist();
+            resetWatched();
+            if (newUserId) {
+              currentUserIdRef.current = newUserId;
+            }
+          }
+        } else if (event === 'SIGNED_OUT') {
+          console.log(`User signed out, resetting stores and user reference`);
+          resetWatchlist();
+          resetWatched();
+          currentUserIdRef.current = null;
+        }
+        
         // Skip if router not ready to prevent navigation errors
         if (!isRouterReady) {
           console.log('Router not ready, skipping navigation');
@@ -454,7 +500,7 @@ export default function useAuth() {
         subscription.unsubscribe();
       }
     };
-  }, [router, segments, isRouterReady, syncWatchlist, syncWatched]);
+  }, [router, segments, isRouterReady, syncWatchlist, syncWatched, resetWatchlist, resetWatched]);
 
   /**
    * Auth state + route protection effect

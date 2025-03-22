@@ -234,6 +234,11 @@ export async function logout(): Promise<void> {
       try {
         localStorage.removeItem('watchlist-storage');
         localStorage.removeItem('watched-storage');
+        
+        // Clear search state data
+        localStorage.removeItem('search_query');
+        localStorage.removeItem('search_active');
+        localStorage.removeItem('selected_category');
       } catch (e) {
         // Ignore errors during cleanup
       }
