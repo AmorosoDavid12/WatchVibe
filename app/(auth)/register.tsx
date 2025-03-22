@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
 import { View, StyleSheet, TouchableOpacity } from 'react-native';
 import { Link, useRouter } from 'expo-router';
-import { signUpWithEmail } from '@/lib/supabase';
+import { register } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText } from 'react-native-paper';
-import { Mail, Lock, UserPlus } from 'lucide-react-native';
+import { Mail, Lock, UserPlus, CheckCircle } from 'lucide-react-native';
 
 export default function RegisterScreen() {
   const router = useRouter();
@@ -14,6 +14,7 @@ export default function RegisterScreen() {
   const [error, setError] = useState<string | null>(null);
   const [secureTextEntry, setSecureTextEntry] = useState(true);
   const [secureConfirmTextEntry, setSecureConfirmTextEntry] = useState(true);
+  const [registrationSuccess, setRegistrationSuccess] = useState(false);
 
   async function handleSignUp() {
     if (!email || !password || !confirmPassword) {
@@ -26,17 +27,89 @@ export default function RegisterScreen() {
       return;
     }
 
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters long');
+      return;
+    }
+
     setError(null);
     setLoading(true);
     try {
-      const { error } = await signUpWithEmail(email, password);
-      if (error) throw error;
-      // No need to redirect, useAuth hook will handle this
+      const { data, error } = await register(email, password);
+      
+      if (error) {
+        // Type assertion for error since we know it's from Supabase
+        const supabaseError = error as { message: string };
+        
+        // Check for specific error types
+        if (supabaseError.message && supabaseError.message.includes('already registered')) {
+          throw new Error('Email already registered. Please use a different email or login.');
+        }
+        throw new Error(supabaseError.message || 'Registration failed');
+      }
+      
+      // Success! Show success UI instead of alert
+      setRegistrationSuccess(true);
+      
+      // Redirect after a short delay to allow the user to read the message
+      setTimeout(() => {
+        router.replace({
+          pathname: '/login',
+          params: { 
+            registered: 'true',
+            email: email,
+            verify: 'true' 
+          }
+        });
+      }, 3000);
+      
     } catch (error: any) {
       setError(error.message || 'Failed to create account');
-    } finally {
       setLoading(false);
     }
+  }
+
+  // Show success UI if registration was successful
+  if (registrationSuccess) {
+    return (
+      <View style={styles.container}>
+        <Surface style={styles.formContainer} elevation={2}>
+          <View style={styles.successContainer}>
+            <CheckCircle size={64} color="#4CAF50" />
+            <Text variant="headlineMedium" style={styles.successTitle}>
+              Account Created!
+            </Text>
+            <Text style={styles.successText}>
+              We've sent a verification link to <Text style={styles.emailHighlight}>{email}</Text>
+            </Text>
+            <Text style={styles.successDescription}>
+              Please check your inbox (and spam folder) and click the verification link to activate your account.
+            </Text>
+            
+            <Button 
+              mode="contained" 
+              onPress={() => {
+                router.replace({
+                  pathname: '/login',
+                  params: { 
+                    registered: 'true',
+                    email: email,
+                    verify: 'true' 
+                  }
+                });
+              }}
+              style={styles.loginButton}
+            >
+              Go to Login
+            </Button>
+            
+            <Text style={styles.redirectText}>
+              Redirecting automatically...
+            </Text>
+          </View>
+        </Surface>
+      </View>
+    );
   }
 
   return (
@@ -153,5 +226,41 @@ const styles = StyleSheet.create({
   linkText: {
     color: '#888',
     fontSize: 14,
+  },
+  // Success screen styles
+  successContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 16,
+  },
+  successTitle: {
+    color: '#fff',
+    fontWeight: 'bold',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  successText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  successDescription: {
+    color: '#888',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  emailHighlight: {
+    fontWeight: 'bold',
+    color: '#4CAF50',
+  },
+  redirectText: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 16,
+  },
+  loginButton: {
+    marginTop: 16,
+    paddingVertical: 6,
   },
 });

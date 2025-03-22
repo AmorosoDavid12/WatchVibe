@@ -43,6 +43,7 @@ const AuthStorage = {
 
 // Create a fresh Supabase client with proper headers
 export const createFreshClient = () => {
+  console.log('Creating fresh Supabase client with URL:', constants.SUPABASE_URL);
   return createClient(
     constants.SUPABASE_URL,
     constants.SUPABASE_ANON_KEY,
@@ -101,6 +102,9 @@ export const createFreshClient = () => {
 // The main Supabase client instance
 export const supabase = createFreshClient();
 
+// Print connection info on startup 
+console.log('Supabase client initialized with project ID:', constants.SUPABASE_PROJECT_ID);
+
 // Get the current session directly from Supabase (server-first approach)
 export async function getCurrentSession() {
   try {
@@ -147,13 +151,50 @@ export async function login(email: string, password: string) {
       )
     ]) as any;
     
+    // Check if there's an email confirmation error
+    if (result.error) {
+      console.log('Login error:', result.error.message);
+      
+      // Format error message for email not confirmed scenarios
+      if (result.error.message?.includes('Email not confirmed') || 
+          result.error.message?.includes('not confirmed') ||
+          result.error.message?.includes('verify')) {
+        console.log('Detected unconfirmed email during login attempt');
+        
+        // Return a more user-friendly error
+        return {
+          data: { user: null, session: null },
+          error: { message: 'Please verify your email before logging in. Check your inbox for the verification link.' }
+        };
+      }
+    }
+    
     return result;
   } catch (error: any) {
     console.error('Login error:', error.message || 'Unknown error');
     
     // Try one more time with the main client
     try {
-      return await supabase.auth.signInWithPassword({ email, password });
+      const result = await supabase.auth.signInWithPassword({ email, password });
+      
+      // Check for email verification issues in the retry as well
+      if (result.error) {
+        console.log('Login retry error:', result.error.message);
+        
+        if (result.error.message?.includes('Email not confirmed') || 
+            result.error.message?.includes('not confirmed') ||
+            result.error.message?.includes('verify')) {
+          console.log('Detected unconfirmed email during login retry');
+          
+          // Return a more user-friendly error
+          return {
+            data: { user: null, session: null },
+            error: { message: 'Please verify your email before logging in. Check your inbox for the verification link.' }
+          };
+        }
+      }
+      
+      return result;
     } catch (retryError) {
       return { data: { user: null, session: null }, error };
     }
@@ -208,24 +249,118 @@ export async function register(email: string, password: string) {
   // Clear existing auth state
   await clearAuthTokens();
   
+  console.log('Starting registration process for:', email);
   try {
+    // For web, use the window.location.origin to ensure correct redirection
+    const redirectUrl = Platform.OS === 'web' 
+      ? `${constants.APP_URL}/login?registered=true&email=${encodeURIComponent(email)}` 
+      : `vibewatch://login?registered=true&email=${encodeURIComponent(email)}`;
+      
+    console.log('Using redirect URL:', redirectUrl);
+    
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
+      options: {
+        emailRedirectTo: redirectUrl,
+        // Explicitly request email confirmation, even if not required by project settings
+        data: {
+          email_confirm_required: true
+        }
+      }
     });
     
-    return { data, error };
+    if (error) {
+      console.error('Registration error:', error.message);
+      return { data, error };
+    } else {
+      console.log('Registration successful, user created:', data?.user?.id);
+      
+      // Check if email confirmation is needed
+      if (data?.user?.identities && data.user.identities.length === 0) {
+        console.log('User already exists but email not confirmed');
+        return { 
+          data, 
+          error: { message: 'This email is already registered but not confirmed. Please check your inbox for verification email.' } 
+        };
+      }
+      
+      // IMPORTANT: Force sign out the user after registration to enforce email verification
+      console.log('Signing out user to enforce email verification flow');
+      await supabase.auth.signOut();
+      
+      // Return a modified data object to indicate email verification is required
+      return { 
+        data: { 
+          ...data, 
+          session: null,  // Clear session to prevent immediate login
+          emailVerificationRequired: true 
+        }, 
+        error: null 
+      };
+    }
   } catch (error) {
-    console.error('Registration error');
+    console.error('Registration error:', error);
     return { data: { user: null, session: null }, error };
   }
 }
 
 // Initiate password reset
 export async function resetPassword(email: string) {
-  return await supabase.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/reset-password`,
+  console.log('Initiating password reset for:', email);
+  
+  // Construct a proper redirect URL
+  const redirectUrl = Platform.OS === 'web'
+    ? `${constants.APP_URL}/reset-password`
+    : 'vibewatch://reset-password';
+    
+  console.log('Using reset password redirect URL:', redirectUrl);
+  
+  const result = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: redirectUrl,
   });
+  
+  if (result.error) {
+    console.error('Password reset error:', result.error.message);
+  } else {
+    console.log('Password reset email sent successfully');
+  }
+  
+  return result;
+}
+
+// Resend verification email
+export async function resendVerificationEmail(email: string) {
+  try {
+    console.log('Attempting to resend verification email to:', email);
+    
+    // We won't check if the email is already confirmed since we don't have admin access
+    // Just call resend method with the appropriate parameters
+    const redirectUrl = Platform.OS === 'web' 
+      ? `${constants.APP_URL}/login?verify=true&email=${encodeURIComponent(email)}` 
+      : `vibewatch://login?verify=true&email=${encodeURIComponent(email)}`;
+      
+    console.log('Using redirect URL for verification:', redirectUrl);
+    
+    const { data, error } = await supabase.auth.resend({
+      type: 'signup',
+      email,
+      options: {
+        emailRedirectTo: redirectUrl
+      }
+    });
+    
+    if (error) {
+      console.error('Resend verification error:', error.message);
+    } else {
+      console.log('Verification email resent successfully');
+    }
+    
+    return { data, error };
+  } catch (error) {
+    console.error('Error resending verification email:', error);
+    return { data: null, error };
+  }
 }
 
 // Fetch data from Supabase with retry logic

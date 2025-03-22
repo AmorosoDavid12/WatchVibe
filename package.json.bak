@@ -18,8 +18,7 @@
     "@supabase/supabase-js": "^2.39.3",
     "@types/lodash": "^4.17.16",
     "buffer": "^6.0.3",
-    "crypto-browserify": "^3.12.0",
-    "dotenv": "^16.4.7",
+    "crypto-browserify": "^3.12.1",
     "expo": "~52.0.38",
     "expo-auth-session": "~6.0.3",
     "expo-blur": "^14.0.3",
@@ -39,6 +38,7 @@
     "lucide-react-native": "^0.475.0",
     "os-browserify": "^0.3.0",
     "path-browserify": "^1.0.1",
+    "peberminta": "^0.9.0",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "react-native": "0.76.7",
@@ -52,6 +52,7 @@
     "react-native-url-polyfill": "^2.0.0",
     "react-native-web": "^0.19.13",
     "react-native-webview": "13.12.5",
+    "resend": "^4.1.2",
     "stream-browserify": "^3.0.0",
     "util": "^0.12.5",
     "zustand": "^5.0.3"
@@ -63,8 +64,7 @@
     "babel-plugin-module-resolver": "^5.0.2",
     "babel-plugin-transform-inline-environment-variables": "^0.4.4",
     "cross-env": "^7.0.3",
-    "react-native-css-transformer": "^2.0.0",
-    "react-native-dotenv": "3.4.9",
+    "react-native-dotenv": "^3.4.11",
     "typescript": "^5.3.3"
   }
 }

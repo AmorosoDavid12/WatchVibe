@@ -1,0 +1,24 @@
+warning: in the working copy of 'app.json', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/(auth)/login.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/(auth)/register.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/_layout.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/search/Highest-Rated/MediaGrid.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/search/Highest-Rated/anime.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/search/Highest-Rated/movies.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'app/search/Highest-Rated/tv.tsx', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'constants.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'h', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'lib/supabase.ts', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'webpack.config.js', LF will be replaced by CRLF the next time Git touches it
+app/(auth)/login.tsx
+app/(auth)/register.tsx
+app/search/Highest-Rated/MediaGrid.tsx
+app/search/Highest-Rated/anime.tsx
+app/search/Highest-Rated/movies.tsx
+app/search/Highest-Rated/tv.tsx
+constants.ts
+h
+hooks/useAuth.ts
+lib/supabase.ts
+package-lock.json
+package.json

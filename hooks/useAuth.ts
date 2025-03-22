@@ -348,6 +348,33 @@ export default function useAuth() {
             return;
           }
         }
+        
+        // Handle fresh registration flow - this could be triggered after sign up
+        // We check for both the event and if there's no email_confirmed_at value
+        if (session?.user && !session.user.email_confirmed_at && 
+            (session.user.created_at === session.user.updated_at || 
+             Date.now() - new Date(session.user.created_at).getTime() < 30000)) {
+          console.log('New registration detected, redirecting to login for email verification');
+          
+          // Always sign out after registration to enforce email verification
+          await supabase.auth.signOut();
+          
+          setIsLoggedIn(false);
+          
+          // Navigate to login with verification notice
+          const userEmail = session?.user?.email || '';
+          navigationDebounceTimer = setTimeout(() => {
+            router.replace({
+              pathname: '/login',
+              params: { 
+                registered: 'true',
+                email: userEmail,
+                verify: 'true' 
+              }
+            });
+          }, 100);
+          return;
+        }
 
         // Signal that auth has changed
         setAuthStateChanges(prevChanges => prevChanges + 1);
@@ -356,6 +383,31 @@ export default function useAuth() {
         navigationDebounceTimer = setTimeout(() => {
           if (session) {
             console.log('User logged in, session present');
+            
+            // Check if user has confirmed their email
+            const hasEmailConfirmed = session.user?.email_confirmed_at !== null;
+            
+            if (!hasEmailConfirmed && event === 'SIGNED_IN') {
+              console.log('Email not verified, redirecting to login');
+              
+              // Set not logged in to prevent access to protected routes
+              setIsLoggedIn(false);
+              
+              // Sign out the user to enforce email verification
+              supabase.auth.signOut().then(() => {
+                // Navigate to login with verification notice
+                router.replace({
+                  pathname: '/login',
+                  params: { 
+                    verify: 'true',
+                    email: session.user?.email || '',
+                    error: 'Please verify your email before logging in.'
+                  }
+                });
+              });
+              return;
+            }
+            
             setIsLoggedIn(true);
             
             // Only sync data if this is a new sign in event

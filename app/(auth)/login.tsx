@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { View, StyleSheet, TouchableOpacity, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { supabase, login, clearAuthTokens } from '@/lib/supabase';
+import { supabase, login, clearAuthTokens, resendVerificationEmail } from '@/lib/supabase';
 import { Text, TextInput, Button, Surface, HelperText, Divider } from 'react-native-paper';
 import { Mail, Lock, Eye, EyeOff } from 'lucide-react-native';
 import * as Linking from 'expo-linking';
@@ -21,6 +21,8 @@ export default function LoginScreen() {
   const [secureConfirmTextEntry, setSecureConfirmTextEntry] = useState(true);
   const [isPasswordReset, setIsPasswordReset] = useState(false);
   const [isCheckingUser, setIsCheckingUser] = useState(true);
+  const [showVerificationReminder, setShowVerificationReminder] = useState(false);
+  const [resendingEmail, setResendingEmail] = useState(false);
   
   const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
   const syncWatched = useWatchedStore(state => state.syncWithSupabase);
@@ -67,6 +69,21 @@ export default function LoginScreen() {
     checkForPasswordReset();
   }, []);
 
+  // Check for params that might indicate the user just registered
+  useEffect(() => {
+    if (params?.registered === 'true' || params?.verify === 'true') {
+      setShowVerificationReminder(true);
+      if (params?.email) {
+        setEmail(params.email as string);
+      }
+      
+      // Set error message if provided in params
+      if (params?.error) {
+        setError(params.error as string);
+      }
+    }
+  }, [params]);
+
   const handleLogin = async () => {
     if (!email || !password) {
       setError('Email and password are required');
@@ -89,9 +106,19 @@ export default function LoginScreen() {
       if (error) {
         console.error('Login error:', error);
         
-        // Handle timeout specifically with a more helpful message
+        // Handle specific error types with better messages
         if (error.message?.includes('timeout') || error.message?.includes('timed out')) {
           setError('Login is taking longer than expected. Please try again.');
+        } else if (
+          error.message?.includes('Email not confirmed') || 
+          error.message?.includes('not confirmed') || 
+          error.message?.includes('verify')
+        ) {
+          // Show verification reminder instead of just an error
+          setShowVerificationReminder(true);
+          setError('Email verification required. Please check your inbox for the verification link.');
+        } else if (error.message?.includes('Invalid login credentials')) {
+          setError('Invalid email or password. Please try again.');
         } else {
           setError(typeof error === 'object' && error !== null ? 
             (error as any).message || 'Failed to login' : 
@@ -154,6 +181,33 @@ export default function LoginScreen() {
     }
   }
 
+  // Function to resend verification email
+  const handleResendVerificationEmail = async () => {
+    if (!email) {
+      setError('Please enter your email address to resend the verification link');
+      return;
+    }
+    
+    setResendingEmail(true);
+    setError(null);
+    
+    try {
+      const { error } = await resendVerificationEmail(email);
+      
+      if (error) {
+        throw new Error(typeof error === 'object' && error !== null && 'message' in error 
+          ? error.message as string 
+          : 'Failed to resend verification email');
+      }
+      
+      setSuccessMessage('Verification email has been resent. Please check your inbox.');
+    } catch (error: any) {
+      setError(error.message || 'Failed to resend verification email');
+    } finally {
+      setResendingEmail(false);
+    }
+  };
+
   if (isCheckingUser) {
     return (
       <View style={[styles.container, styles.centered]}>
@@ -184,6 +238,27 @@ export default function LoginScreen() {
           <HelperText type="info" visible={!!successMessage} style={styles.successMessage}>
             {successMessage}
           </HelperText>
+        )}
+        
+        {showVerificationReminder && (
+          <View style={styles.verificationReminder}>
+            <Text style={styles.verificationReminderTitle}>
+              Email Verification Required
+            </Text>
+            <Text style={styles.verificationReminderText}>
+              We've sent a verification link to {email ? <Text style={styles.emailHighlight}>{email}</Text> : 'your email'}. 
+              Please check your inbox (and spam folder) and click the verification link before signing in.
+            </Text>
+            <TouchableOpacity 
+              onPress={handleResendVerificationEmail}
+              disabled={resendingEmail}
+              style={styles.resendButton}
+            >
+              <Text style={styles.resendButtonText}>
+                {resendingEmail ? 'Sending...' : 'Resend verification email'}
+              </Text>
+            </TouchableOpacity>
+          </View>
         )}
         
         {/* Email field - readonly in password reset mode */}
@@ -339,5 +414,38 @@ const styles = StyleSheet.create({
   successMessage: {
     color: '#4CAF50',
     marginBottom: 16,
+  },
+  verificationReminder: {
+    backgroundColor: 'rgba(33, 150, 243, 0.15)',
+    padding: 16,
+    borderRadius: 8,
+    marginBottom: 20,
+    borderLeftWidth: 4,
+    borderLeftColor: '#2196F3',
+  },
+  verificationReminderTitle: {
+    color: '#0d47a1',
+    fontSize: 16,
+    fontWeight: 'bold',
+    marginBottom: 6,
+  },
+  verificationReminderText: {
+    color: '#0d47a1',
+    fontSize: 14,
+    marginBottom: 10,
+    lineHeight: 20,
+  },
+  emailHighlight: {
+    fontWeight: 'bold',
+  },
+  resendButton: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+  },
+  resendButtonText: {
+    color: '#2196F3',
+    fontSize: 14,
+    fontWeight: 'bold',
+    textDecorationLine: 'underline',
   },
 });

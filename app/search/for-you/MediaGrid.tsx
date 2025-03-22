@@ -26,10 +26,10 @@ const showToast = (message: string, type: 'success' | 'error' | 'info' = 'succes
 
 type MediaGridProps = {
   data: TMDbSearchResult[];
-  isHighestRatedSection?: boolean;
+  isTrendingSection?: boolean;
 };
 
-export default function MediaGrid({ data, isHighestRatedSection = true }: MediaGridProps) {
+export default function MediaGrid({ data, isTrendingSection = true }: MediaGridProps) {
   const router = useRouter();
   const { hasItem: isInWatchlist, addItem: addToWatchlist } = useWatchlistStore();
   const { hasItem: isInWatched, removeItem: removeFromWatched } = useWatchedStore();
@@ -131,8 +131,8 @@ export default function MediaGrid({ data, isHighestRatedSection = true }: MediaG
           </Text>
         </View>
         
-        {/* Rating badge in bottom left for highest rated items */}
-        {isHighestRatedSection && rating ? (
+        {/* Rating badge in bottom left */}
+        {rating ? (
           <View style={styles.ratingBadge}>
             <Star size={9} color="#FFD700" fill="#FFD700" />
             <Text style={styles.ratingBadgeText}>{rating}</Text>
@@ -180,7 +180,6 @@ export default function MediaGrid({ data, isHighestRatedSection = true }: MediaG
 const styles = StyleSheet.create({
   grid: {
     padding: SPACING,
-    paddingBottom: 69, // Reduced to match the new tab bar height
   },
   mediaItem: {
     margin: SPACING / 2,
@@ -250,7 +249,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 10,
     right: 10,
-    backgroundColor: 'rgba(76, 175, 80, 0.8)',
+    backgroundColor: 'rgba(46, 204, 113, 0.8)',
     borderRadius: 15,
     width: 30,
     height: 30,
@@ -261,7 +260,7 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 10,
     right: 10,
-    backgroundColor: 'rgba(255, 152, 0, 0.8)',
+    backgroundColor: 'rgba(243, 156, 18, 0.8)',
     borderRadius: 15,
     width: 30,
     height: 30,

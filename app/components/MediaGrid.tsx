@@ -1,11 +1,11 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { StyleSheet, FlatList, View, Dimensions } from 'react-native';
 import { useRouter } from 'expo-router';
 import { TouchableOpacity, Image, Text } from 'react-native';
 import { Star, Film, Tv, Plus, Check, Repeat } from 'lucide-react-native';
-import { useWatchlistStore } from '../../../lib/watchlistStore';
-import { useWatchedStore } from '../../../lib/watchedStore';
-import { formatSearchResult, TMDbSearchResult } from '../../../lib/tmdb';
+import { useWatchlistStore } from '../../lib/watchlistStore';
+import { useWatchedStore } from '../../lib/watchedStore';
+import { formatSearchResult, TMDbSearchResult } from '../../lib/tmdb';
 import Toast from 'react-native-toast-message';
 
 const { width } = Dimensions.get('window');
@@ -26,27 +26,48 @@ const showToast = (message: string, type: 'success' | 'error' | 'info' = 'succes
 
 type MediaGridProps = {
   data: TMDbSearchResult[];
-  isHighestRatedSection?: boolean;
+  isTrendingSection?: boolean;
 };
 
-export default function MediaGrid({ data, isHighestRatedSection = true }: MediaGridProps) {
+export default function MediaGrid({ data, isTrendingSection = true }: MediaGridProps) {
   const router = useRouter();
-  const { hasItem: isInWatchlist, addItem: addToWatchlist } = useWatchlistStore();
+  const { hasItem: isInWatchlist, addItem: addToWatchlist, syncWithSupabase: syncWatchlist } = useWatchlistStore();
   const { hasItem: isInWatched, removeItem: removeFromWatched } = useWatchedStore();
+  
+  // Add state to force re-renders when watchlist changes
+  const [watchlistUpdateKey, setWatchlistUpdateKey] = useState(0);
+  
+  // Sync watchlist when component mounts to ensure fresh data
+  useEffect(() => {
+    const doInitialSync = async () => {
+      await syncWatchlist();
+      // Force a re-render after sync
+      setWatchlistUpdateKey(prev => prev + 1);
+    };
+    
+    doInitialSync();
+  }, []);
 
-  const handleAddToWatchlist = (result: TMDbSearchResult) => {
+  const handleAddToWatchlist = async (result: TMDbSearchResult) => {
     const formattedResult = formatSearchResult(result);
     if (formattedResult) {
       const inWatchlist = isInWatchlist(result.id);
       if (!inWatchlist) {
-        addToWatchlist(formattedResult)
-          .then(() => {
+        try {
+          const added = await addToWatchlist(formattedResult);
+          if (added) {
             showToast(`"${formattedResult.title}" added to watchlist`, 'success');
-          })
-          .catch((error: any) => {
-            console.error('Error adding to watchlist:', error);
-            showToast(`Failed to add "${formattedResult.title}" to watchlist`, 'error');
-          });
+          } else {
+            // Item might already exist in database but not in local state
+            showToast(`"${formattedResult.title}" is already in your watchlist`, 'info');
+          }
+          
+          // Force re-render to update UI
+          setWatchlistUpdateKey(prev => prev + 1);
+        } catch (error: any) {
+          console.error('Error adding to watchlist:', error);
+          showToast(`Failed to add "${formattedResult.title}" to watchlist`, 'error');
+        }
       }
     }
   };
@@ -68,6 +89,9 @@ export default function MediaGrid({ data, isHighestRatedSection = true }: MediaG
         } else {
           showToast(`"${title}" is already in your watchlist`, 'info');
         }
+        
+        // Force re-render to update UI
+        setWatchlistUpdateKey(prev => prev + 1);
       } catch (error) {
         console.error('Error moving to watchlist:', error);
         showToast(`Failed to move "${title}" to watchlist`, 'error');
@@ -85,6 +109,8 @@ export default function MediaGrid({ data, isHighestRatedSection = true }: MediaG
       item.media_type = mediaType;
     }
 
+    // Get current state from the stores - this ensures we always use the latest state
+    // Using watchlistUpdateKey as a dependency to trigger re-checks
     const inWatchlist = isInWatchlist(item.id);
     const inWatched = isInWatched(item.id);
     const rating = item.vote_average ? item.vote_average.toFixed(1) : '';
@@ -131,8 +157,8 @@ export default function MediaGrid({ data, isHighestRatedSection = true }: MediaG
           </Text>
         </View>
         
-        {/* Rating badge in bottom left for highest rated items */}
-        {isHighestRatedSection && rating ? (
+        {/* Rating badge in bottom left */}
+        {rating ? (
           <View style={styles.ratingBadge}>
             <Star size={9} color="#FFD700" fill="#FFD700" />
             <Text style={styles.ratingBadgeText}>{rating}</Text>
@@ -169,10 +195,11 @@ export default function MediaGrid({ data, isHighestRatedSection = true }: MediaG
     <FlatList
       data={data}
       renderItem={renderMediaItem}
-      keyExtractor={(item) => `grid-${item.id}`}
+      keyExtractor={(item) => `grid-${item.id}-${watchlistUpdateKey}`}
       numColumns={GRID_COLUMNS}
       contentContainerStyle={styles.grid}
       showsVerticalScrollIndicator={false}
+      extraData={watchlistUpdateKey}
     />
   );
 }
@@ -180,7 +207,6 @@ export default function MediaGrid({ data, isHighestRatedSection = true }: MediaG
 const styles = StyleSheet.create({
   grid: {
     padding: SPACING,
-    paddingBottom: 69, // Reduced to match the new tab bar height
   },
   mediaItem: {
     margin: SPACING / 2,
