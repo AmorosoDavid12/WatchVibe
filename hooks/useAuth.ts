@@ -376,6 +376,19 @@ export default function useAuth() {
           return;
         }
 
+        // Check for email verification redirect (type=signup in URL)
+        if (typeof window !== 'undefined' && window.location.href.includes('type=signup')) {
+          console.log('Email verification redirect detected!');
+          
+          // Give a moment for the session to be properly established
+          navigationDebounceTimer = setTimeout(() => {
+            // Session should already be created by Supabase
+            // Just redirect to the main app
+            router.replace('/(tabs)');
+          }, 500);
+          return;
+        }
+
         // Signal that auth has changed
         setAuthStateChanges(prevChanges => prevChanges + 1);
 

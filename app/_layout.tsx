@@ -30,6 +30,14 @@ export default function RootLayout() {
   const [initialLoadComplete, setInitialLoadComplete] = useState(false);
   const [fadeLoading, setFadeLoading] = useState(false);
   
+  // Add email verification redirect detection
+  useEffect(() => {
+    // Check for email verification redirect
+    if (typeof window !== 'undefined' && window.location.href.includes('type=signup')) {
+      console.log('Email verification redirect detected in root layout');
+    }
+  }, []);
+  
   // Get store actions
   const syncWatchlist = useWatchlistStore(state => state.syncWithSupabase);
   const syncWatched = useWatchedStore(state => state.syncWithSupabase);

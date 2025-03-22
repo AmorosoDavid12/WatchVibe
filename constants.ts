@@ -4,7 +4,7 @@ import { Platform } from 'react-native';
 // Define base URL for redirects - IMPORTANT: This must match your Supabase project's Site URL setting
 export const APP_URL = Platform.OS === 'web' && typeof window !== 'undefined' && window.location.origin 
   ? window.location.origin 
-  : 'https://vibewatch-app.vercel.app'; // Must match Supabase Site URL configuration
+  : 'https://watch-vibe.vercel.app'; // Must match Supabase Site URL configuration
 
 // Supabase project configuration
 export const SUPABASE_PROJECT_ID = 'gihofdmqjwgkotwxdxms';

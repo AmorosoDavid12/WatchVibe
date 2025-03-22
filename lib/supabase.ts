@@ -251,10 +251,11 @@ export async function register(email: string, password: string) {
   
   console.log('Starting registration process for:', email);
   try {
-    // For web, use the window.location.origin to ensure correct redirection
+    // For web, use the production URL to ensure consistent redirects
+    // This should match the Site URL in Supabase dashboard settings
     const redirectUrl = Platform.OS === 'web' 
-      ? `${constants.APP_URL}/login?registered=true&email=${encodeURIComponent(email)}` 
-      : `vibewatch://login?registered=true&email=${encodeURIComponent(email)}`;
+      ? `${constants.APP_URL}` 
+      : `vibewatch://`;
       
     console.log('Using redirect URL:', redirectUrl);
     
@@ -309,7 +310,7 @@ export async function register(email: string, password: string) {
 export async function resetPassword(email: string) {
   console.log('Initiating password reset for:', email);
   
-  // Construct a proper redirect URL
+  // Construct a proper redirect URL for production
   const redirectUrl = Platform.OS === 'web'
     ? `${constants.APP_URL}/reset-password`
     : 'vibewatch://reset-password';
@@ -337,8 +338,8 @@ export async function resendVerificationEmail(email: string) {
     // We won't check if the email is already confirmed since we don't have admin access
     // Just call resend method with the appropriate parameters
     const redirectUrl = Platform.OS === 'web' 
-      ? `${constants.APP_URL}/login?verify=true&email=${encodeURIComponent(email)}` 
-      : `vibewatch://login?verify=true&email=${encodeURIComponent(email)}`;
+      ? `${constants.APP_URL}` 
+      : `vibewatch://`;
       
     console.log('Using redirect URL for verification:', redirectUrl);
     
