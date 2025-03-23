@@ -8,15 +8,29 @@
     "scheme": "myapp",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/images/icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#ffffff"
+    },
+    "updates": {
+      "fallbackToCacheTimeout": 0,
+      "url": "https://u.expo.dev/b0eed13d-92bd-4f1c-b39b-cd2feea0a593"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "bundleIdentifier": "com.vibewatch.app"
     },
     "android": {
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/icon.png",
         "backgroundColor": "#ffffff"
       },
-      "package": "com.vibewatch.app"
+      "package": "com.vibewatch.app",
+      "permissions": []
     },
     "web": {
       "bundler": "metro",
@@ -38,6 +52,9 @@
         "projectId": "b0eed13d-92bd-4f1c-b39b-cd2feea0a593"
       }
     },
-    "owner": "davidamoroso12"
+    "owner": "davidamoroso12",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
   }
 }
